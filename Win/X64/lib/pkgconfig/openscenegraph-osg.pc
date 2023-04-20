@@ -1,0 +1,14 @@
+# pkg-config source file
+
+prefix=D:/Git/OpenSource/BuildOK
+exec_prefix=${prefix}
+libdir=${exec_prefix}/lib
+includedir=${prefix}/include
+
+Name: openscenegraph-osg
+Description: 3D scenegraph
+Version: 3.7.0
+Requires: openthreads
+Conflicts:
+Libs: -L${libdir} -losgd
+Cflags: -I${includedir}

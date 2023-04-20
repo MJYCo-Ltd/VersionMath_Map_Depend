@@ -1,0 +1,11 @@
+prefix=D:/Git/OpenSource/BuildOK
+exec_prefix=D:/Git/OpenSource/BuildOK/bin
+libdir=D:/Git/OpenSource/BuildOK/lib
+includedir=D:/Git/OpenSource/BuildOK/include
+
+Name: libqrencode
+Description: A QR Code encoding library
+Version: 4.1.1
+Libs: -L${libdir} -lqrencode
+Libs.private: 
+Cflags: -I${includedir}

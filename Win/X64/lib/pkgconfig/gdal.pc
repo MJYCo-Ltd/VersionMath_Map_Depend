@@ -1,0 +1,17 @@
+CONFIG_VERSION=3.7.0dev
+CONFIG_INST_PREFIX=D:/Git/OpenSource/BuildOK
+CONFIG_INST_LIBS=-LIBPATH:D:/Git/OpenSource/BuildOK/lib gdal
+CONFIG_INST_CFLAGS=-ID:/Git/OpenSource/BuildOK/include
+CONFIG_INST_DATA=D:/Git/OpenSource/BuildOK/share/gdal
+prefix=${CONFIG_INST_PREFIX}
+exec_prefix=${prefix}
+libdir=${exec_prefix}/lib
+includedir=${exec_prefix}/include
+datadir=${CONFIG_INST_DATA}
+
+Name: libgdal
+Description: Geospatial Data Abstraction Library
+Version: ${CONFIG_VERSION}
+Libs: ${CONFIG_INST_LIBS}
+Libs.private: "C:/Program Files/OpenSSL-Win64/lib/VC/libssl64MDd.lib" "C:/Program Files/OpenSSL-Win64/lib/VC/libcrypto64MDd.lib" crypt32 wbemuuid D:/Git/OpenSource/BuildOK/lib/tiffd.lib ws2_32 D:/Git/OpenSource/BuildOK/lib/jpegd.lib D:/Git/OpenSource/BuildOK/lib/libpng16d.lib D:/Git/OpenSource/BuildOK/lib/zlibd.lib D:/Git/OpenSource/BuildOK/lib/sqlite3.lib "C:/Program Files (x86)/Windows Kits/10/Lib/10.0.22621.0/um/x64/odbccp32.lib" "C:/Program Files (x86)/Windows Kits/10/Lib/10.0.22621.0/um/x64/WS2_32.Lib" legacy_stdio_definitions.lib odbccp32.lib D:/Git/OpenSource/BuildOK/lib/geos_cd.lib D:/Git/OpenSource/BuildOK/lib/libcurl-d_imp.lib psapi D:/Git/OpenSource/BuildOK/lib/proj_d.lib
+Cflags: ${CONFIG_INST_CFLAGS}

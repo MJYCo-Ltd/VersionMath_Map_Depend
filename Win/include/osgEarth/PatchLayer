@@ -1,0 +1,178 @@
+/* -*-c++-*- */
+/* osgEarth - Geospatial SDK for OpenSceneGraph
+ * Copyright 2020 Pelican Mapping
+ * http://osgearth.org
+ *
+ * osgEarth is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU Lesser General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU Lesser General Public License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public License
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>
+ */
+
+#ifndef OSGEARTH_PATCH_LAYER_H
+#define OSGEARTH_PATCH_LAYER_H 1
+
+#include <osgEarth/VisibleLayer>
+#include <osgEarth/TerrainTileNode>
+#include <osg/RenderInfo>
+#include <osg/Texture>
+
+namespace osgEarth
+{
+    class TileBatch;
+    class TileRenderer;
+
+    /**
+     * PatchLayer is a layer that can render terrain tiles using either
+     * a geometry shader patch (GL_PATCHES) or a custom draw callback.
+     */
+    class OSGEARTH_EXPORT PatchLayer : public VisibleLayer
+    {
+    public: // serialization
+        class OSGEARTH_EXPORT Options : public VisibleLayer::Options {
+        public:
+            META_LayerOptions(osgEarth, Options, VisibleLayer::Options);
+            virtual Config getConfig() const;
+        private:
+            void fromConfig(const Config& conf);
+        };
+
+    public:
+        META_Layer(osgEarth, PatchLayer, Options, VisibleLayer, Patch);
+
+        //! API providing access to patch geometry 
+        class OSGEARTH_EXPORT TileInfoProvider
+        {
+        public:
+            //! Bounding box of the actual tile geometry (could be cropped by a mask)
+            virtual const osg::BoundingBox& getGeomBoundingBox() const = 0;
+
+            //! Bounding box of the full tile
+            virtual const osg::BoundingBox& getTileBoundingBox() const = 0;
+        };
+
+        /**
+         * Callback that the terrain engine will call to decide whether to 
+         * render a tile in this layer.
+         */
+        struct AcceptCallback : public osg::Referenced
+        {
+            /** Whether to accept the entire layer. Innvoked during Cull. */
+            virtual bool acceptLayer(osg::NodeVisitor& nv, const osg::Camera* camera) const { return true; }
+
+            /** Whether to accept a specific tile. Invoked during Cull. */
+            virtual bool acceptKey(const TileKey& key) const { return true; }
+        };
+
+    public:
+
+        virtual void cull(
+            const TileKey& key,
+            osg::NodeVisitor& nv) const { }
+
+        virtual void cull(
+            const TileBatch& batch,
+            osg::NodeVisitor& nv) const { }
+
+        virtual void draw(
+            osg::RenderInfo& ri) const { }
+
+        //! Custom tile renderer for this layer
+        //void setRenderer(TileRenderer* value) {
+        //    _renderer = value;
+        //}
+        virtual TileRenderer* getRenderer() const {
+            return nullptr;
+        }
+
+        //! Callback that decides which tiles to accept for rendering
+        void setAcceptCallback(AcceptCallback* value) { _acceptCallback = value; }
+        AcceptCallback* getAcceptCallback() const { return _acceptCallback.get(); }
+
+
+    protected:
+
+        // default destructor
+        virtual ~PatchLayer() { }
+
+        //! post-ctor initialization, chain to super/subclasses.
+        virtual void init();
+
+    private:
+        osg::ref_ptr<AcceptCallback> _acceptCallback;
+        //TileRenderer* _renderer;
+    };
+
+    using PatchLayerVector = std::vector<osg::ref_ptr<PatchLayer>>;
+
+
+    /**
+     * Interface for a patchlayer to access information and state
+     * about a terrain tile
+     */
+    class TileState
+    {
+    public:
+        virtual const TileKey& getKey() const = 0;
+
+        virtual int getRevision() const = 0;
+
+        virtual const osg::BoundingBox& getBBox() const = 0;
+
+        virtual const osg::Matrix& getModelViewMatrix() const = 0;
+
+        virtual const osg::Matrixd& getLocalToWorld() const = 0;
+
+        virtual int getSequence() const = 0;
+
+        virtual float getMorphStartRange() const = 0;
+
+        virtual float getMorphEndRange() const = 0;
+
+        virtual bool apply(
+            osg::RenderInfo& ri,
+            void* implData) const = 0;
+
+        virtual void debug(
+            osg::RenderInfo& ri,
+            void* implData) const { }
+
+    };
+
+    /**
+     * Collection of tiles for a patchlayer to render
+     */
+    class TileBatch
+    {
+    public:
+        TileBatch(void* env) : _env(env) { }
+
+        const std::vector<const TileState*>& tiles() const { return _tiles; }
+        void* env() const { return _env; }
+
+        std::vector<const TileState*> _tiles;
+        void* _env;
+    };
+
+    /**
+     * Interface for rendering a tile batch (patchlayer)
+     */
+    class TileRenderer
+    {
+    public:
+        virtual void draw(
+            osg::RenderInfo& ri,
+            const TileBatch& tiles) = 0;
+    };
+
+} // namespace osgEarth
+
+#endif // OSGEARTH_PATCH_LAYER_H

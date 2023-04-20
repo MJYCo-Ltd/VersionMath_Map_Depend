@@ -1,0 +1,10 @@
+prefix=D:/Git/OpenSource/BuildOK
+exec_prefix=D:/Git/OpenSource/BuildOK
+libdir=D:/Git/OpenSource/BuildOK/lib
+includedir=D:/Git/OpenSource/BuildOK/include
+
+Name: libjpeg
+Description: A SIMD-accelerated JPEG codec that provides the libjpeg API
+Version: 2.0.91
+Libs: -L${libdir} -ljpeg
+Cflags: -I${includedir}

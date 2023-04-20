@@ -1,0 +1,14 @@
+# libvorbisenc pkg-config source file
+
+prefix=D:/Git/OpenSource/BuildOK
+exec_prefix=D:/Git/OpenSource/BuildOK/bin
+libdir=D:/Git/OpenSource/BuildOK/lib
+includedir=D:/Git/OpenSource/BuildOK/include
+
+Name: vorbisenc
+Description: vorbisenc is a library that provides a convenient API for setting up an encoding environment using libvorbis
+Version: 1.3.7
+Requires.private: vorbis
+Conflicts:
+Libs: -L${libdir} -lvorbisenc
+Cflags: -I${includedir}

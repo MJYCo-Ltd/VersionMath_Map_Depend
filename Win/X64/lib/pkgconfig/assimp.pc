@@ -1,0 +1,9 @@
+libdir=D:/Git/OpenSource/BuildOK/lib
+includedir=D:/Git/OpenSource/BuildOK/include
+
+Name: Assimp
+Description: Import various well-known 3D model formats in an uniform manner.
+Version: 5.2.5
+Libs: -L${libdir} -lassimp
+Libs.private:  -lz
+Cflags: -I${includedir}

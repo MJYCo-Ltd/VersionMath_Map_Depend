@@ -1,0 +1,231 @@
+/* -*-c++-*- */
+/* osgEarth - Geospatial SDK for OpenSceneGraph
+* Copyright 2020 Pelican Mapping
+* http://osgearth.org
+*
+* osgEarth is free software; you can redistribute it and/or modify
+* it under the terms of the GNU Lesser General Public License as published by
+* the Free Software Foundation; either version 2 of the License, or
+* (at your option) any later version.
+*
+* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+* IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+* FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+* AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+* LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+* FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+* IN THE SOFTWARE.
+*
+* You should have received a copy of the GNU Lesser General Public License
+* along with this program.  If not, see <http://www.gnu.org/licenses/>
+*/
+#ifndef OSGEARTH_INSTANCE_CLOUD
+#define OSGEARTH_INSTANCE_CLOUD 1
+
+#include <osgEarth/Common>
+#include <osgEarth/Containers>
+#include <osgEarth/GLUtils>
+#include <osgEarth/TextureArena>
+
+#include <osg/Geometry>
+#include <osg/GL>
+#include <osg/Texture2DArray>
+#include <osg/NodeVisitor>
+#include <osg/Program>
+
+namespace osgEarth
+{
+    class GeometryCloud;
+
+    /**
+     * InstanceCloud is a helper class that facilitates primitive set
+     * instancing across multiple tiles.
+     */
+    class OSGEARTH_EXPORT InstanceCloud : public osg::Referenced
+    {
+    public:
+
+        // Buffer holding all draw commands (Keep a CPU copy for wiping)
+        struct CommandBuffer
+        {
+            mutable GLBuffer::Ptr _buf;
+            mutable std::vector<DrawElementsIndirectCommand> _backing;
+            GeometryCloud* _geom;
+            void allocate(GeometryCloud* cloud, osg::State&);
+            void reset(osg::State&);
+            void release() const { _buf = nullptr, _backing.clear(); }
+        };
+
+        // Buffer holding per-tile information. 
+        // For now this consists of the modelview and normal matrices for each tile.
+        // Since we draw the entire tile set in one call, we need these matrices
+        // so we can transform the verts in the shader
+        struct TileBuffer
+        {
+            struct Data {
+                GLfloat _modelViewMatrix[16];   // 64
+                GLint   _inUse; // 4
+                GLfloat _padding[3]; // 12
+            };
+            mutable std::vector<Data> _backing;
+            mutable GLBuffer::Ptr _buf;
+            void allocate(unsigned numTiles, osg::State&);
+            void update() const;
+            void release() const { _buf = nullptr, _backing.clear(); }
+        };
+
+        // Data about each rendered instance.
+        // Use the _padding field to maintain vec4-alignment (16 bytes)
+        struct InstanceData
+        {
+            GLfloat vertex[4];   // 16
+
+            GLfloat tilec[2];    // 8
+            GLfloat width;       // 4
+            GLfloat height;      // 4
+
+            GLfloat sinrot;      // 4
+            GLfloat cosrot;      // 4
+            GLfloat fillEdge;    // 4
+            GLfloat sizeScale;   // 4
+
+            GLfloat pixelSizeRatio;  // 4
+            GLint modelCommand;      // 4
+            GLint billboardCommmand; // 4
+            GLint tileNum;          // 4
+
+            GLuint drawMask;         // 4
+            GLfloat _padding[3];     // 12
+        };
+
+        // Buffer containing information on each instance in each tile.
+        // Each tile's data starts at an offset based on the total dimensions
+        // of each tile multiplied by the tile number.
+        struct InstanceBuffer
+        {
+            mutable GLBuffer::Ptr _buf;
+            void allocate(unsigned numTiles, unsigned numInstancesPerTile, osg::State&);
+            void release() const { _buf = nullptr; }
+        };
+
+        // Buffer containing the index of each index to cull.
+        struct CullBuffer
+        {
+            struct Data {
+                DispatchIndirectCommand di;
+                GLfloat _padding[1];
+            };
+            mutable Data _backing;
+            mutable GLBuffer::Ptr _buf;
+            void allocate(unsigned numTiles, osg::State&);
+            void clear();
+            void release() const { _buf = nullptr; }
+        };
+
+        // Buffer containing the index of each instance to render after passing cull.
+        struct RenderBuffer
+        {
+            mutable GLBuffer::Ptr _buf;
+            void allocate(unsigned numTiles, osg::State&);
+            void release() const { _buf = nullptr; }
+        };
+
+        struct PCPData
+        {
+            PCPData() : _pcp(nullptr), _passUL(-1), _numCommandsUL(-1) { }
+            const osg::Program::PerContextProgram* _pcp;
+            GLint _passUL;      // uniform location for compute/rendering pass
+            GLint _numCommandsUL; // uniform loc for draw cmd count
+        };
+
+        struct InstancingData
+        {
+            CommandBuffer _commandBuffer; // One for each unique model plus one for billboards
+            TileBuffer _tileBuffer;       // per-tile information (matrices and in-use flags)
+            InstanceBuffer _instanceBuffer; // instances emitted by the generate pass.
+            CullBuffer _cullBuffer;         // instances emitted by the merge pass, ready for culling.
+            RenderBuffer _renderBuffer;     // instances emitted by the cull pass, ready for rendering.
+
+            unsigned _numX, _numY;
+            unsigned _numTilesActive;
+            mutable unsigned _numTilesAllocated;
+            unsigned _numInstancesGenerated;
+            unsigned _highestTileSlotInUse;
+
+            std::unordered_map<const void*, PCPData> _pcpData;
+
+            osg::ref_ptr<GeometryCloud> _geom;  // merged geometry
+
+            InstancingData();
+            ~InstancingData();
+            bool allocateGLObjects(osg::State& state, unsigned numTiles);
+            void releaseGLObjects(osg::State* state) const;
+
+            inline PCPData* getPCPData(osg::RenderInfo& ri) {
+                auto pcp = ri.getState()->getLastAppliedProgramObject();
+                if (!pcp) return nullptr;
+                PCPData& p = _pcpData[pcp];
+                if (p._pcp == nullptr) {
+                    p._pcp = pcp;
+                    p._passUL = pcp->getUniformLocation(osg::Uniform::getNameID("oe_pass"));
+                    p._numCommandsUL = pcp->getUniformLocation(osg::Uniform::getNameID("oe_ic_numCommands"));
+                }
+                return &p;
+            }
+        };
+
+    public:
+        InstanceCloud();
+
+        //! The merged geometry that this instance will render
+        void setGeometryCloud(GeometryCloud*);
+        GeometryCloud* getGeometryCloud() const;
+
+        //! Max number of asset instances allowed in a single tile
+        void setNumInstancesPerTile(unsigned x, unsigned y);
+
+        //! Maximum # of instances ina  tile
+        unsigned getNumInstancesPerTile() const;
+       
+        //! Allocates memory as needed and initializes GPU buffers.
+        //! Run this any time the tile batch changes.
+        //! Returns true if new memory was allocated and old data is now invalid.
+        bool allocateGLObjects(osg::RenderInfo&, unsigned numTiles);
+
+        //! Tell the instancer the highest tile index currently in use.
+        void setHighestTileSlot(unsigned slot);
+
+        //! Prepare to render a new frame by binding buffers
+        void bind(osg::RenderInfo&);
+
+        //! Clean up at the end of the frame and unbind the buffers
+        void unbind(osg::RenderInfo&);
+
+        //! Sets the modeview matrix for a tile
+        void setMatrix(unsigned tileNum, const osg::Matrix& modelView);
+
+        //! Sets whether to render a tile
+        void setTileActive(unsigned tileNum, bool value);
+        
+        //! Run the generate compute shader pass (only when tile batch changes)
+        void generate_begin(osg::RenderInfo&);
+        void generate_tile(osg::RenderInfo&);
+        void generate_end(osg::RenderInfo&);
+
+        //! Run the cull/sort compute shader (only when generating or when the camera moves)
+        void cull(osg::RenderInfo&);
+
+        //! Render the entire tile batch (every frame)
+        void draw(osg::RenderInfo&);
+
+        //! Free up GL objects
+        void releaseGLObjects(osg::State* state) const;
+
+    private:
+
+        InstancingData _data;
+        void (GL_APIENTRY * glDispatchComputeIndirect)(GLintptr);
+    };
+}
+
+#endif // OSGEARTH_INSTANCE_CLOUD
