@@ -1,0 +1,11 @@
+<map name="River" type="geocentric" version="3">
+    <tmsimage name="satellite">
+        <url>http://127.0.0.1/WeServer/tms/1.0.0/acimage/</url>
+    </tmsimage>
+    <tmsimage name="label">
+        <url>http://127.0.0.1/WeServer/tms/1.0.0/aclabel/</url>
+    </tmsimage>
+    <tmselevation name="dem">
+        <url>http://127.0.0.1/WeServer/tms/1.0.0/acdem/</url>
+    </tmselevation>
+</map>

@@ -1,0 +1,122 @@
+<map name="Projected" type="Projected" version="3">
+	<options>
+        <!-- profile>global-mercator</profile -->
+		<!--terrain driver="rex" color="#A3CCFF" /-->
+		<profile>plate-carree</profile>
+        <lighting>false</lighting>
+    </options>
+	
+	<!--XyzImage name="gaode_satellite"info="高德卫星" cache_enabled="true">
+        <url>http://webst02.is.autonavi.com/appmaptile?style=6&amp;x={x}&amp;y={y}&amp;z={z}</url>
+        <profile>spherical-mercator</profile>
+	</XyzImage>
+    <XyzImage name="gaode_road" info="高德道路" cache_enabled="true">
+        <url>http://webst04.is.autonavi.com/appmaptile?lang=zh_cn&amp;size=1&amp;scale=1&amp;style=8&amp;x={x}&amp;y={y}&amp;z={z}</url>
+        <profile>spherical-mercator</profile>
+	</XyzImage-->
+    <tmsimage name="sjz122">
+        <url>./sjz/tms.xml</url>
+    </tmsimage>
+	
+	<!--GDALImage name="background" visible="true" async="false">
+		<url>./shangzhuang.tif</url>
+	</GDALImage-->
+	
+	<!--OGRFeatures name="world">
+        <url>../Shp/world.shp</url>
+    </OGRFeatures>
+	<OGRFeatures name="Country_Boundary">
+        <url>../Shp/CountryBoundary.shp</url>
+    </OGRFeatures>
+	<OGRFeatures name="China_Boundary">
+        <url>../Shp/ch_boundary.shp</url>
+    </OGRFeatures>
+	<OGRFeatures name="Province_Boundary">
+        <url>../Shp/province_boundary.shp</url>
+    </OGRFeatures>
+	<OGRFeatures name="Rivers">
+        <url>../Shp/Rivers.shp</url>
+    </OGRFeatures>
+	<OGRFeatures name="Lakes">
+        <url>../Shp/Lakes.shp</url>
+    </OGRFeatures>
+    
+    <FeatureModel name="worldfill" features="world">    
+        <styles>
+            <style type="text/css">
+                worldfill{
+				   fill:        #ffffe6;
+                   render-bin:RenderBin;
+                   render-depth-test:false;
+                }            
+            </style>
+        </styles>
+    </FeatureModel>
+	<FeatureModel name="CountryBoundary" features="Country_Boundary"> 
+        <layout  paged="false" />
+        <styles>
+            <style type="text/css">
+                CountryBoundary{
+                   stroke-width:             1.5px;
+				   stroke:                   #808080;
+				   stroke-stipple:           65535;
+                   render-bin:RenderBin;
+                   render-depth-test:false;
+                }            
+            </style>
+        </styles>
+    </FeatureModel>
+	<FeatureModel name="ChinaBoundary" features="China_Boundary"> 
+        <layout  paged="false" />
+        <styles>
+            <style type="text/css">
+                ChinaBoundary{
+                   stroke-width:             1.5px;
+				   stroke:                   #aa0000;
+				   stroke-stipple:           65535;
+                   render-bin:RenderBin;
+                   render-depth-test:false;
+                }            
+            </style>
+        </styles>
+    </FeatureModel>
+	<FeatureModel name="ProvinceBoundary" features="Province_Boundary"> 
+        <layout  paged="false" />    
+        <styles>
+            <style type="text/css">
+                ProvinceBoundary{
+                   stroke-width:             1.5px;
+				   stroke:                   #808080;
+				   stroke-stipple:           65535;
+                   render-bin:RenderBin;
+                   render-depth-test:false;
+                }            
+            </style>
+        </styles>
+    </FeatureModel>
+	<FeatureModel name="WorldRivers" features="Rivers">
+        <layout  paged="false" />   
+        <styles>
+            <style type="text/css">
+                WorldRivers{
+                   stroke-width:             2px;
+				   stroke:                   #A3CCFF;
+                   render-bin:RenderBin;
+                   render-depth-test:false;
+                }            
+            </style>
+        </styles>
+    </FeatureModel>
+	<FeatureModel name="EarthLakes" features="Lakes">
+        <layout  paged="false" />  
+        <styles>
+            <style type="text/css">
+                EarthLakes{
+				   fill:#A3CCFF;
+                   render-bin:RenderBin;
+                   render-depth-test:false;
+                }            
+            </style>
+        </styles>
+    </FeatureModel-->
+</map>

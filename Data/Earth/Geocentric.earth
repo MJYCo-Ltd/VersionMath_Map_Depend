@@ -1,0 +1,323 @@
+<!--
+osgEarth Sample
+
+Basic example of how to read feature data from a shapefile and build
+OSG geometry out of it.
+-->
+
+<map name="3DMap" type="geocentric" version="3.0">
+
+    <!--TMSImage name="HeBeiImage">
+	   <url>//192.168.31.1/TMSData/Image/tms.xml</url>
+	   <interpolation>nearest</interpolation>
+	</TMSImage>
+    <TMSImage name="HeBeiRoadImage">
+	   <url>//192.168.31.1/TMSData/Label/tms.xml</url>
+	   <interpolation>nearest</interpolation>
+       <![CDATA[
+          
+            #pragma vp_entryPoint raiseClouds
+            #pragma vp_location vertex_view
+            vec3 oe_UpVectorView;
+            const float cloudsAlt = 20000.0;
+            void raiseClouds(inout vec4 vv) {
+                vv.xyz += oe_UpVectorView*cloudsAlt;
+            }
+            
+            [break]
+            
+            #pragma vp_entryPoint alphaOut
+            #pragma vp_location fragment_coloring
+            void alphaOut(inout vec4 color) {
+                float fa = clamp(distance(color.rgb, vec3(0)), 0.0, 1.0);
+                if(fa<0.5)
+                {
+                    discard;
+                }
+
+                color.a = fa;
+            }
+            
+          ]]>
+	</TMSImage>
+    <tmselevation name="ChinaElevation">
+	    <url>\\192.168.31.1\TMSData\Dem\tms.xml</url>
+	</tmselevation-->
+    <!--Ocean>
+        <max_altitude>1e30</max_altitude>
+        <use_bathymetry>true</use_bathymetry>  
+        <shader_define>IS_OCEAN</shader_define>  
+    </Ocean>
+    <GDALImage name="clouds">
+        <url>../Image/cloud_combined_2048.jpg</url>
+        <profile>global-geodetic</profile>
+        <shader>
+          <![CDATA[
+          
+            #pragma vp_entryPoint raiseClouds
+            #pragma vp_location vertex_view
+            vec3 oe_UpVectorView;
+            const float cloudsAlt = 20000.0;
+            void raiseClouds(inout vec4 vv) {
+                vv.xyz += oe_UpVectorView*cloudsAlt;
+            }
+
+            [break]
+            
+            #pragma vp_entryPoint alphaOut
+            #pragma vp_location fragment_coloring
+            void alphaOut(inout vec4 color) {
+                float fa = clamp(distance(color.rgb, vec3(0)), 0.0, 1.0);
+                if(fa<0.5)
+                {
+                    discard;
+                }
+                color.a = fa;
+            }
+          ]]>
+        </shader>
+    </GDALImage-->
+    <!--tmsimage name="sjz">
+        <url>./sjz/tms.xml</url>
+    </tmsimage>
+	<XyzImage name="gaode_satellite"info="高德卫星" cache_enabled="true">
+        <url>http://webst02.is.autonavi.com/appmaptile?style=6&amp;x={x}&amp;y={y}&amp;z={z}</url>
+        <profile>spherical-mercator</profile>
+	</XyzImage>
+    <XyzImage name="gaode_road" info="高德道路" cache_enabled="true">
+        <url>http://webst04.is.autonavi.com/appmaptile?lang=zh_cn&amp;size=1&amp;scale=1&amp;style=8&amp;x={x}&amp;y={y}&amp;z={z}</url>
+        <profile>spherical-mercator</profile>
+	</XyzImage-->
+    <!--ArcGISServerImage name="World Imagery">
+        <url>http://services.arcgisonline.com/arcgis/rest/services/World_Imagery/MapServer/</url>
+        <nodata_image>http://services.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/100/0/0.jpeg</nodata_image>
+    </ArcGISServerImage>
+    <ArcGISServerImage name="Transportation" enabled="false">
+        <url>http://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer</url>
+    </ArcGISServerImage>
+
+    <ArcGISServerImage name="Shaded Relief" enabled="false">
+        <url>http://services.arcgisonline.com/arcgis/rest/services/World_Shaded_Relief/MapServer</url>
+    </ArcGISServerImage>
+
+    <ArcGISServerElevation name="Elevation layer" enabled="true">
+        <url>http://services.arcgisonline.com/arcgis/rest/services/WorldElevation3D/Terrain3D/ImageServer</url>
+    </ArcGISServerElevation-->
+    <!--xyzimage name="天地图">
+        <url>http://t3.tianditu.cn/img_c/wmts?service=wmts{%26}request=GetTile{%26}version=1.0.0{%26}LAYER=img{%26}tileMatrixSet=c{%26}TileMatrix={z}{%26}TileRow={y}{%26}TileCol={x}{%26}style=default{%26}format=tiles</url>
+    </xyzimage -->
+    <!--gdalimage name="shuju">
+        <url>./world.tif</url>
+    </gdalimage-->
+	<!--XyzImage name="mapbox_satellite" cache_enabled="true" info="谷歌卫星">
+        <url>http://mt2.google.cn/vt/lyrs=y&amp;hl=zh-CN&amp;gl=cn&amp;x={x}&amp;y={y}&amp;z={z}</url>
+        <profile>spherical-mercator</profile>
+		<interpolation>nearest</interpolation>
+	</XyzImage>
+	<tmselevation name="twelevation">
+	    <url>F:/Map/Tiles/dem/tw-1/tms.xml</url>
+		<interpolation>nearest</interpolation>
+	</tmselevation-->
+	<!--FeatureModel name="Buildings">
+        <OGRFeatures name="buildings">
+			<url>../Shp/building/qx/qx.shp</url>
+        </OGRFeatures>
+        
+        <layout tile_size="500">
+            <level name="default" max_range="20000" style="buildings"/>
+        </layout>
+        
+        <styles>            
+            <library name="us_resources">
+                <url>../Building/textures_us/catalog.xml</url>
+            </library>
+            
+            <style type="text/css">
+                buildings {
+                    extrusion-height:        max([floor]*3, 3.8);
+                    extrusion-flatten:       true;
+                    extrusion-wall-style:    building-wall;
+                    extrusion-wall-gradient: 0.5;
+                    extrusion-roof-style:    building-rooftop;
+                    altitude-clamping:       terrain;
+                    altitude-technique:      map;
+                    altitude-binding:        vertex;
+					altitude-resolution:     0;
+                }            
+                building-wall {
+                    skin-library:     us_resources;
+                    skin-tags:        building;
+                    skin-random-seed: 1;
+                }
+                building-rooftop {
+                    skin-library:     us_resources;
+                    skin-tags:        rooftop;
+                    skin-tiled:       true;
+                    skin-random-seed: 1;
+                }
+            </style>
+        </styles>   
+    </FeatureModel-->
+	<!--gdalelevation name="twelevation" cache_enabled="true">
+	    <url>F:/Map/dem/tw-1.tif</url>
+	</gdalelevation-->
+	<gdalimage name="world">
+		<url>./world.tif</url>
+        <interpolation>nearest</interpolation>
+	</gdalimage>
+	<!--xyzelevation name="googleterrain" info="谷歌高程">
+        <url>http://mt2.google.cn/vt/lyrs=t&amp;scale=0.1&amp;hl=zh-CN&amp;gl=cn&amp;x={x}&amp;y={y}&amp;z={z}</url>
+        <profile>spherical-mercator</profile>
+	</xyzelevation -->
+	<!-- tmsimage name="earthimage">
+		<url>E:\Qt\satellite\zs-space-situation-graph\distribute\AntData\planets\earth-image\tms.xml</url>
+	</tmsimage -->
+	<!--GDALElevation name="gebco1" cache_enabled="true">
+		<url>../Dem/gebco_2020_n0.0_s-90.0_w0.0_e90.0.tif</url>
+	</GDALElevation>
+    <GDALElevation name="gebco2" cache_enabled="true">
+		<url>../Dem/gebco_2020_n0.0_s-90.0_w-90.0_e0.0.tif</url>
+	</GDALElevation>
+    <GDALElevation name="gebco3" cache_enabled="true">
+		<url>../Dem/gebco_2020_n0.0_s-90.0_w90.0_e180.0.tif</url>
+	</GDALElevation>
+    <GDALElevation name="gebco4" cache_enabled="true">
+		<url>../Dem/gebco_2020_n0.0_s-90.0_w-180.0_e-90.0.tif</url>
+	</GDALElevation>
+    <GDALElevation name="gebco5" cache_enabled="true">
+		<url>../Dem/gebco_2020_n90.0_s0.0_w0.0_e90.0.tif</url>
+	</GDALElevation>
+    <GDALElevation name="gebco6" cache_enabled="true">
+		<url>../Dem/gebco_2020_n90.0_s0.0_w-90.0_e0.0.tif</url>
+	</GDALElevation>
+    <GDALElevation name="gebco7" cache_enabled="true">
+		<url>../Dem/gebco_2020_n90.0_s0.0_w90.0_e180.0.tif</url>
+	</GDALElevation>
+    <GDALElevation name="gebco8" cache_enabled="true">
+		<url>../Dem/gebco_2020_n90.0_s0.0_w-180.0_e-90.0.tif</url>
+	</GDALElevation-->
+	
+	<!--OGRFeatures name="SC">
+            <geometry>
+                POLYGON((
+				125.39808182 42.36498520 0,
+				125.40380650 42.36993419 0,
+				125.40782681 42.37375841 0,
+				125.41322720 42.37613239 0,
+				125.41990763 42.37786990 0,
+				125.41925195 42.37961242 0,
+				125.42917357 42.38080093 0,
+				125.42918272 42.38053472 0,
+				125.43056454 42.38251507 0,
+				125.43364180 42.38488383 0,
+				125.43929743 42.38420599 0,
+				125.44073885 42.38236050 0,
+				125.46075679 42.38690146 0,
+				125.46661753 42.36941334 0,
+				125.45521660 42.36721338 0,
+				125.45162850 42.36306910 0,
+				125.44729497 42.36139270 0,
+				125.44130120 42.36064931 0,
+				125.43756143 42.35895701 0,
+				125.43013495 42.35737170 0,
+				125.42613595 42.35725088 0,
+				125.42281278 42.35507945 0,
+				125.41456746 42.35462123 0,
+				125.41151612 42.35627835 0,
+				125.40964074 42.35811357 0,
+				125.40712786 42.35926622 0,
+				125.40104387 42.36128500 0,
+				125.39808182 42.36498520 0))
+            </geometry>
+    </OGRFeatures>
+    <FeatureModel name="shancheng" features="SC">
+		<styles>
+			<style type="text/css">
+					SC{
+					fill:     #ffff007f;
+					stroke:   #ffffff;
+					stroke-width: 2px;
+					altitude-clamping: terrain-drape;
+					}
+			</style>
+		</styles>
+	</FeatureModel>
+	<FlattenedElevation name="flattened" attr="ELEVATION" features="SC">
+        <min_level>7</min_level>
+        <max_level>17</max_level>
+    </FlattenedElevation>
+	<model name="osgdbBuilding">
+		<location long="125.46075679" lat="42.38236050" />
+		<url>F:/BaiduNetdiskDownload/shancheng/shanchengzhen/Data/root.osgb</url>
+	</model>
+	
+    <Annotations>
+		<label text="model" long="125.46075679" lat="42.38236050" />
+		stroke-image:             "Images/ship.png"
+		                   stroke-wire-lines:        true;
+                   stroke-script:            0xFF00;
+	</Annotations-->
+	
+	<!--OGRFeatures name="world-data">
+        <url>../Shp/ch_boundary.shp</url>
+    </OGRFeatures>
+    
+    <FeatureModel name="Country boundaries" features="world-data">     
+        <styles>
+            <style type="text/css">
+                world {
+                   stroke:                   #ffff00;
+                   stroke-width:             2px;
+                   render-lighting:          false;
+                   altitude-offset:          1000; 
+                   altitude-clamping: terrain-drape;		   
+                }            
+            </style>
+        </styles>
+    </FeatureModel>
+	
+	<OGRFeatures name="geometry1">
+        <geometry>
+            POLYGON((-120 30, -120 50, -70 50, -70 30))
+        </geometry>
+    </OGRFeatures>
+	<OGRFeatures name="geometry2">
+        <geometry>
+            POINT((103.566212 19.573845, 179.0606607 25.910152, 116.358510 20.009330, 125.625319 19.748377))
+        </geometry>
+    </OGRFeatures>
+   
+
+    <FeatureModel name="Great Circle" features="geometry1">
+        <geo_interpolation>great_circle</geo_interpolation>
+        <styles>
+            <style type="text/css">
+                default {
+                   fill: #ffff006f;
+                   stroke: #ffff00;
+                   stroke-width: 1px;
+                   stroke-tessellation-size: 100km;
+                   altitude-clamping: terrain-drape;
+                }                    
+            </style>
+        </styles>        
+    </FeatureModel>
+	<FeatureModel name="world_boundaries" features="geometry2">
+        <styles>
+            <style type="text/css">
+                world {
+				fill: #ffff006f;
+                   stroke:             #ffff00;
+                   stroke-width:       4px;
+                   altitude-clamping:  terrain-drape;
+                }            
+            </style>
+        </styles>
+    </FeatureModel-->
+	
+	<!--options>
+		<cache type="filesystem">
+			<path>./MapCache</path>
+		</cache>
+	</options-->
+</map>
