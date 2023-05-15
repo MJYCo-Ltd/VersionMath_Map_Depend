@@ -1,0 +1,15 @@
+// CMake will compile this file into AutoGenShaders.c""
+
+#include <osgEarthProcedural/ProceduralShaders>
+
+osgEarth::Procedural::ProceduralShaders::ProceduralShaders()
+{
+    TextureSplatting = "Procedural.TextureSplatting.glsl";
+    _sources[TextureSplatting] = @Procedural.TextureSplatting.glsl@;
+
+    Vegetation = "Procedural.Vegetation.glsl";
+    _sources[Vegetation] = @Procedural.Vegetation.glsl@;
+
+    HexTiling = "Procedural.HexTiling.glsl";
+    _sources[HexTiling] = @Procedural.HexTiling.glsl@;
+}

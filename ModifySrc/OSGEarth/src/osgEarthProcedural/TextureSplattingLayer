@@ -1,0 +1,128 @@
+/* -*-c++-*- */
+/* osgEarth - Geospatial SDK for OpenSceneGraph
+* Copyright 2008-2012 Pelican Mapping
+* http://osgearth.org
+*
+* osgEarth is free software; you can redistribute it and/or modify
+* it under the terms of the GNU Lesser General Public License as published by
+* the Free Software Foundation; either version 2 of the License, or
+* (at your option) any later version.
+*
+* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+* IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+* FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+* AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+* LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+* FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+* IN THE SOFTWARE.
+*
+* You should have received a copy of the GNU Lesser General Public License
+* along with this program.  If not, see <http://www.gnu.org/licenses/>
+*/
+#ifndef OSGEARTH_PROCEDURAL_SPLATTING_LAYER_H
+#define OSGEARTH_PROCEDURAL_SPLATTING_LAYER_H
+
+#include <osgEarthProcedural/Export>
+#include <osgEarthProcedural/BiomeLayer>
+#include <osgEarthProcedural/LifeMapLayer>
+#include <osgEarth/GLUtils>
+#include <osgEarth/ImageLayer>
+#include <osgEarth/LayerReference>
+#include <osgEarth/TextureArena>
+
+namespace osgEarth { namespace Procedural
+{
+    //! Layer that renders geotypical textures on the terrain based on
+    //! Biome classification data ("texture splatting").
+    class OSGEARTHPROCEDURAL_EXPORT TextureSplattingLayer : public VisibleLayer
+    {
+    public:
+        class OSGEARTHPROCEDURAL_EXPORT Options : public VisibleLayer::Options
+        {
+        public:
+            META_LayerOptions(osgEarth, Options, VisibleLayer::Options);
+            OE_OPTION_LAYER(BiomeLayer, biomeLayer);
+            OE_OPTION_LAYER(LifeMapLayer, lifeMapLayer);
+            OE_OPTION(int, numLevels);
+            OE_OPTION(bool, useHexTiler);
+            OE_OPTION(float, normalMapPower);
+            OE_OPTION(float, lifeMapMaskThreshold);
+            OE_OPTION(float, displacementDepth);
+            OE_OPTION(unsigned, maxTextureSize);
+            virtual Config getConfig() const;
+        private:
+            void fromConfig(const Config& conf);
+        };
+
+    public:
+        META_Layer(osgEarthProcedural, TextureSplattingLayer, Options, VisibleLayer, SplatImage);
+
+        BiomeLayer* getBiomeLayer() const;
+
+        LifeMapLayer* getLifeMapLayer() const;
+
+        //! Whether to use a shader that obfuscates the repeating textures 
+        //! found in texture splatting. Incurs a small GPU performance penalty.
+        //! Default is true.
+        void setUseHexTiler(bool value);
+        bool getUseHexTiler() const;
+
+        //! Multiplication power to apply to normal maps, to artificially
+        //! enhance to effect of splatted normals. [0..1] Default is 1.0
+        void setNormalMapPower(float value);
+        float getNormalMapPower() const;
+
+        //! The lifemap threshold (dense+lush+rugged) below which the 
+        //! splatting layer will beome transparent and allow lower layer(s)
+        //! to show through. [0..1] Default = 1.0 (off)
+        void setLifeMapMaskThreshold(float value);
+        float getLifeMapMaskThreshold() const;
+
+        //! Amount by which the textures' displacement map affects
+        //! blending across splatting textures. [0..1, default = 0.1]
+        void setDisplacementDepth(float value);
+        float getDisplacementDepth() const;
+
+        //! Sets a maximum size for splatting textures on the GPU
+        void setMaxTextureSize(unsigned value);
+        unsigned getMaxTextureSize() const;
+
+
+    protected:
+
+        //! Override post-ctor init
+        virtual void init() override;
+        virtual void prepareForRendering(TerrainEngine* engine) override;
+
+    public:
+
+        virtual void addedToMap(const Map* map) override;
+        virtual void removedFromMap(const Map* map) override;
+        virtual void update(osg::NodeVisitor&) override;
+        virtual void resizeGLObjectBuffers(unsigned maxSize) override;
+        virtual void releaseGLObjects(osg::State* state) const override;
+
+    protected:
+        virtual ~TextureSplattingLayer() { }
+        
+        struct Materials
+        {
+            using Ptr = std::shared_ptr<Materials>;
+            osg::ref_ptr<TextureArena> _arena;
+            osg::ref_ptr<osg::Uniform> _textureScales;
+            std::vector<const MaterialAsset*> _assets;
+        };
+
+        Future<Materials::Ptr> _materialsJob;
+        Materials::Ptr _materials;
+        TextureImageUnitReservation _noiseUnit;
+
+        void buildStateSets();
+
+        Materials::Ptr loadMaterials(
+            const AssetCatalog&,
+            Cancelable*) const;
+    };
+} } // namespace osgEarth::Procedural
+
+#endif // OSGEARTH_PROCEDURAL_SPLATTING_LAYER_H

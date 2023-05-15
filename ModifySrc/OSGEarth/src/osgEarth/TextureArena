@@ -1,0 +1,232 @@
+/* -*-c++-*- */
+/* osgEarth - Geospatial SDK for OpenSceneGraph
+* Copyright 2020 Pelican Mapping
+* http://osgearth.org
+*
+* osgEarth is free software; you can redistribute it and/or modify
+* it under the terms of the GNU Lesser General Public License as published by
+* the Free Software Foundation; either version 2 of the License, or
+* (at your option) any later version.
+*
+* This program is distributed in the hope that it will be useful,
+* but WITHOUT ANY WARRANTY; without even the implied warranty of
+* MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+* GNU Lesser General Public License for more details.
+*
+* You should have received a copy of the GNU Lesser General Public License
+* along with this program.  If not, see <http://www.gnu.org/licenses/>
+*/
+#ifndef OSGEARTH_TEXTURE_ARENA_H
+#define OSGEARTH_TEXTURE_ARENA_H 1
+
+#include <osgEarth/Common>
+#include <osgEarth/GLUtils>
+#include <osgEarth/URI>
+#include <osg/Object>
+#include <osg/StateAttribute>
+#include <osg/buffered_value>
+#include <osg/Image>
+#include <queue>
+#include <atomic>
+
+namespace osgEarth
+{
+    /**
+     * A texture that can be GPU-resident or not. Managed by a TextureArena.
+     *
+     * Stages of residency:
+     * 1. Not resident - only the URI is set
+     * 2. CPU resident - osg::Image is loaded into memory
+     * 3. GPU resident - GPU handle is in GPU table; GPU memory might not be allocated
+     * 4. GPU commited - GPU handle active, GPU texture fully available
+     */
+    class OSGEARTH_EXPORT Texture
+    {
+    public:
+        using Ptr = std::shared_ptr<Texture>;
+        using WeakPtr = std::weak_ptr<Texture>;
+
+        //! Create for a given texture target
+        static Ptr create(
+            osg::Image* image = nullptr,
+            GLenum target = GL_TEXTURE_2D);
+
+        //! Create from an existing OSG texture instance
+        static Ptr create(
+            osg::Texture* tex);
+
+        //! Make this texture resident as a bindless texture
+        void makeResident(const osg::State&, bool toggle) const;
+
+        //! True if the texture is resident in state's context
+        bool isResident(const osg::State&) const;
+
+        //! True if the texture has been uploaded to the GPU 
+        //! in the state's context
+        bool isCompiled(const osg::State&) const;
+
+        //! Whether we need to compile (or recompile) this texture
+        bool needsCompile(const osg::State&) const;
+
+        //! Wether the underlying image is dynamic
+        //! and needs updates.
+        bool needsUpdates() const;
+
+        //! Update the underlying image if necessary
+        void update(osg::NodeVisitor& nv);
+
+        //! GL memory functions
+        void compileGLObjects(osg::State&) const;
+        void resizeGLObjectBuffers(unsigned);
+        void releaseGLObjects(osg::State*, bool force=false) const;
+
+        OE_PROPERTY(std::string, name);
+        OE_PROPERTY(std::string, category);
+        OE_PROPERTY(bool, compress);
+        OE_PROPERTY(bool, mipmap);
+        OE_PROPERTY(bool, clamp);
+        OE_PROPERTY(bool, keepImage);
+        OE_PROPERTY(unsigned, maxDim);
+        
+        OE_OPTION(URI, uri);
+        OE_OPTION(GLenum, internalFormat);
+        OE_OPTION(float, maxAnisotropy);
+
+        OE_PROPERTY(osg::ref_ptr<osg::Texture>, osgTexture);
+        OE_PROPERTY_CONST(GLenum, target);
+
+        //! Whether any actual image data has been loaded into this object,
+        //! or whether we need to load it from the URI
+        bool dataLoaded() const;
+
+        //! GLObjects are shareable across GCs because they are static and bindless.
+        struct GLObjects : public ShareableGLObjects
+        {
+            GLTexture::Ptr _gltexture;
+            unsigned _imageModCount;
+            GLObjects() : _imageModCount(0) { }
+        };
+        mutable osg::buffered_object<GLObjects> _globjects;
+
+        ~Texture();
+
+    protected:
+        Texture(GLenum target);
+        Texture(osg::Texture*);
+        void* _host;
+        friend class TextureArena;
+    };
+
+    typedef std::vector<Texture::Ptr> TextureVector;
+
+    /**
+     * TextureArena is a dynamic bindless texture atlas. Add as many texture
+     * as you want and control memory management by activating and deactivating
+     * them.
+     *
+     * Call add() to have the arena start managing a Texture.
+     * After that, you can call activate() or deactivate() on individual textures
+     * to control their availability on the GPU.
+     */
+    #define OE_TEXTURE_ARENA_SA_TYPE_ID (osg::StateAttribute::Type)(osg::StateAttribute::CAPABILITY+8675309)
+
+    class OSGEARTH_EXPORT TextureArena : public osg::StateAttribute
+    {
+    public:
+        META_StateAttribute(osgEarth, TextureArena, OE_TEXTURE_ARENA_SA_TYPE_ID);
+
+        //! Construct an empty arena.
+        TextureArena();
+
+        //! Whether to automatically release textures when they are no longer
+        //! referenced anywhere outside of this arena. Default is false.
+        //! You can enable this if you want to populate the arena with
+        //! textures that will be released when their owners desctruct (for example).
+        void setAutoRelease(bool value);
+        bool getAutoRelease() const { return _autoRelease; }
+
+        //! Sets the GLSL binding point for the arena. Default is 5.
+        void setBindingPoint(unsigned value);
+
+        //! Sets the maximum texture size (in one dimension, in pixels)
+        //! to allocate on the GPU.
+        void setMaxTextureSize(unsigned pixels);
+
+        //! Adds a texture to the arena. On next apply() GL handles will allocate.
+        //! You only need to call this once for each texture.
+        //! Returns the index of the texture handle
+        int add(
+            Texture::Ptr tex,
+            const osgDB::Options* readOptions = nullptr);
+
+        //! Find and return the index of this texture in the arena,
+        //! or return -1 if not found.
+        int find(Texture::Ptr tex) const;
+
+        //! Find the texture at index i.
+        Texture::Ptr find(unsigned index) const;
+        
+        //! Number of textures registered
+        size_t size() const { return _textures.size(); }
+
+        //! Textures installed in this arena
+        const TextureVector& getTextures() const { return _textures; }
+
+        //! destruct
+        virtual ~TextureArena();
+
+        //! Update traversal (called automatically if this TexturArena
+        //! is installed in a StateSet in the traversed scene graph)
+        void update(osg::NodeVisitor& nv);
+
+        //! Flush any unused textures immediately from the arena
+        void flush();
+
+    public: // StateAttribute
+        void apply(osg::State&) const override;
+        void compileGLObjects(osg::State&) const override;
+        void resizeGLObjectBuffers(unsigned) override;
+        void releaseGLObjects(osg::State*) const override;
+        int compare(const osg::StateAttribute& rhs) const override { return -1; }
+
+    private:
+        //! disable copy
+        TextureArena(const TextureArena&, const osg::CopyOp&) { } 
+
+        void releaseGLObjects(osg::State*, bool force) const;
+
+        // GL objects that are per-state because they are not bindless
+        struct GLObjects : public PerStateGLObjects
+        {
+            GLObjects() : _inUse(false), _lastAppliedFrame(-1) { }
+            bool _inUse;
+            std::queue<int> _toCompile;
+            TextureVector _toRemove;
+
+            GLBuffer::Ptr _handleBuffer;
+            std::vector<GLuint64> _handles;
+            bool _dirty;
+            int _lastAppliedFrame;
+        };
+        mutable osg::buffered_object<GLObjects> _globjects;
+
+        mutable TextureVector _textures;
+        mutable std::unordered_map<Texture::Ptr, unsigned int> _textureIndices;
+        mutable std::unordered_set<unsigned> _dynamicTextures;
+        bool _autoRelease;
+        unsigned _bindingPoint;
+        bool _useUBO;
+        mutable int _releasePtr;
+        unsigned _maxDim;
+
+        mutable Mutex _m;
+
+        int find_no_lock(Texture::Ptr tex) const;
+        void purgeTextureIfOrphaned_no_lock(unsigned index);
+
+        friend class Texture;
+        void notifyOfTextureRelease(osg::State*) const;
+    };
+}
+
+#endif // OSGEARTH_TEXTURE_ARENA_H

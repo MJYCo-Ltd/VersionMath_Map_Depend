@@ -1,0 +1,250 @@
+/* -*-c++-*- */
+/* osgEarth - Geospatial SDK for OpenSceneGraph
+* Copyright 2020 Pelican Mapping
+* http://osgearth.org
+*
+* osgEarth is free software; you can redistribute it and/or modify
+* it under the terms of the GNU Lesser General Public License as published by
+* the Free Software Foundation; either version 2 of the License, or
+* (at your option) any later version.
+*
+* This program is distributed in the hope that it will be useful,
+* but WITHOUT ANY WARRANTY; without even the implied warranty of
+* MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+* GNU Lesser General Public License for more details.
+*
+* You should have received a copy of the GNU Lesser General Public License
+* along with this program.  If not, see <http://www.gnu.org/licenses/>
+*/
+#ifndef OSGEARTH_PROCEDURAL_BIOME_MANAGER
+#define OSGEARTH_PROCEDURAL_BIOME_MANAGER 1
+
+#include <osgEarthProcedural/Biome>
+#include <osgEarth/Chonk>
+
+namespace osgEarth
+{
+    class TextureArena;
+
+    namespace Procedural
+    {
+        using namespace osgEarth;
+
+        /**
+         * A ModelAsset that has been "materialized" for rendering by
+         * loading the data from its URIs, including the actual model
+         * node and billboard textures.
+         *
+         * This contains NO per-instance information (like selection
+         * weight or fill percentage).
+         */
+        class OSGEARTHPROCEDURAL_EXPORT ResidentModelAsset
+        {
+        public:
+            using Ptr = std::shared_ptr<ResidentModelAsset>;
+
+            //! Create a new asset
+            static Ptr create();
+
+            //! the asset definition materialized in this object
+            using ModelAssetPtr = const ModelAsset * ;
+
+            //! Reference the model definintion itself
+            OE_PROPERTY(ModelAssetPtr, assetDef);
+
+            //! Local bounding box of the model
+            OE_PROPERTY(osg::BoundingBox, boundingBox);
+
+            //! the model node loaded from the asset definition
+            OE_PROPERTY(osg::ref_ptr<osg::Node>, model);
+
+            //! the impostor node loaded from the asset definition
+            OE_PROPERTY(osg::ref_ptr<osg::Node>, impostor);
+
+            //! impostor textures
+            OE_PROPERTY(osg::ref_ptr<osg::Texture>, sideBillboardTex);
+            OE_PROPERTY(osg::ref_ptr<osg::Texture>, sideBillboardNormalMap);
+            OE_PROPERTY(osg::ref_ptr<osg::Texture>, sideBillboardPBRMap);
+            OE_PROPERTY(osg::ref_ptr<osg::Texture>, topBillboardTex);
+            OE_PROPERTY(osg::ref_ptr<osg::Texture>, topBillboardNormalMap);
+            OE_PROPERTY(osg::ref_ptr<osg::Texture>, topBillboardPBRMap);
+
+            //! Bindless geometry chonk
+            OE_PROPERTY(Chonk::Ptr, chonk);
+
+        private:
+            ResidentModelAsset();
+        };
+
+        /**
+         * Instance of a loaded model asset within the rendering system.
+         * It is possible to have different instances all refer to the
+         * same model asset, each with different usage parameters.
+         */
+        class OSGEARTHPROCEDURAL_EXPORT ResidentModelAssetInstance
+        {
+        public:
+            ResidentModelAssetInstance() :
+                _weight(1.0f),
+                _coverage(1.0f) { }
+
+            OE_PROPERTY(ResidentModelAsset::Ptr, residentAsset);
+
+            // selection weight
+            OE_PROPERTY(float, weight);
+
+            // coverage percentage
+            OE_PROPERTY(float, coverage);
+        };
+
+        /**
+         * Manages the collection of active Biomes and Assets.
+         * This class is responsible for making assets resident when
+         * a containing Biome becomes active, and loading and creating
+         * all the associated geometry and impostor geometry. It will
+         * also unload these resident assets when they are no longer
+         * needed.
+         */
+        class OSGEARTHPROCEDURAL_EXPORT BiomeManager
+        {
+        public:
+            using ResidentModelAssetsByName = std::map<
+                std::string, // name
+                ResidentModelAsset::Ptr>;
+
+            using ResidentModelAssetInstances = 
+                std::vector<ResidentModelAssetInstance>;
+
+            struct ResidentBiome {
+                const Biome* biome;
+                ResidentModelAssetInstances instances;
+            };
+            
+            using ResidentBiomesById = std::map<
+                std::string, // biome id
+                ResidentBiome>;
+
+            struct Impostor {
+                osg::ref_ptr<osg::Node> _node;
+                float _farLODScale;
+            };
+            
+            using CreateImpostorFunction = std::function<
+                Impostor(
+                    const osg::BoundingBox& bbox,
+                    float top_billboard_z,
+                    std::vector<osg::Texture*>&)>;
+
+        public:
+            BiomeManager();
+
+            //! Set the SSE pixel scale at which a 3D model should
+            //! transition to an imposter model. Default is 16.0.
+            //! Example: if the SSE is 20, then the high LOD will start to
+            //! show up at a screen space size of 20*N pixels.
+            void setLODTransitionPixelScale(float value);
+            float getLODTransitionPixelScale() const;
+
+            //! The revision of the current configuration. This increments
+            //! every time the set of resident biomes changes, so that a
+            //! client can decide to get an updated configuration.
+            int getRevision() const;
+
+            //! Collection of all active biomes
+            std::vector<const Biome*> getActiveBiomes() const;
+
+            //! Collection of assets loaded into memory (snapshot in time)
+            std::vector<const ModelAsset*> getResidentAssets() const;
+
+            //! Calls getResidentAssets(), but returns immediately with
+            //! and empty collection if another thread if holding the lock.
+            //! This is useful for monitoring/UIs.
+            std::vector<const ModelAsset*> getResidentAssetsIfNotLocked() const;
+
+            //! Assigns a function that will create an "impostor" (low LOD) geometry
+            //! for a particular asset group.
+            void setCreateImpostorFunction(
+                const std::string& group,
+                CreateImpostorFunction function);
+
+            //! Gets a copy of the currently resident biomes
+            //! (which is a snapshot in time)
+            ResidentBiomesById getResidentBiomes(
+                const osgDB::Options*);
+
+            //! The texture arena containing all textures loaded
+            //! by this biome manager. You should install this on
+            //! the stateset you will use when rendering the assets.
+            TextureArena* getTextures() const {
+                return _textures.get();
+            }
+
+        public: // internal system functions
+
+            //! Tell the manager to increase the usage count of a biome by one.
+            //! If there are no users, the manager will make the biome resident.
+            //! @param biome Biome to activate
+            void ref(const Biome* biome);
+
+            //! Tell the manager to decrease the usage count of a biome by one.
+            //! If the user count goes to zero, teh manager will release the
+            //! biome's instance and free its memory.
+            void unref(const Biome* biome);
+
+            //! Unload everything and set all the refs to zero.
+            void reset();
+
+            //! Sets the biome manager to be locked, meaning that
+            //! it will never unload data by unref.
+            void setLocked(bool value) {
+                _locked = value;
+            }
+
+            //! Refreshes the resident set and flushes any
+            //! stale memory/textures.
+            void flush();
+
+        private:
+            mutable Mutex _refsAndRevision_mutex;
+            mutable Mutex _residentData_mutex;
+            int _revision;
+            float _lodTransitionPixelScale;
+
+            vector_map<
+                std::string,
+                CreateImpostorFunction
+            > _createImpostorFunctions;
+
+            using BiomeRefs = std::map<const Biome*, int>;
+            BiomeRefs _refs;
+            bool _locked;
+
+            // all currently loaded model assets (regardless of biome)
+            ResidentModelAssetsByName _residentModelAssets;
+
+            // all model asset usage records, sorted by biome
+            ResidentBiomesById _residentBiomes;
+
+            // texture arena that holds all the textures for 
+            // loaded assets.
+            osg::ref_ptr<TextureArena> _textures;
+
+            //! Recalculate the required resident biome sets
+            void recalculateResidentBiomes();
+
+            //! Based on the computed set of resident biomes,
+            //! loads any assets that need loading, making them resident.
+            void materializeNewAssets(
+                const osgDB::Options* readOptions);
+
+            //! add flexibility attributes to a model for
+            //! wind/deformation support
+            void addFlexors(
+                osg::ref_ptr<osg::Node>& node,
+                float stiffness,
+                bool isUndergrowth);
+        };
+    }
+} // namespace osgEarth::Procedural
+
+#endif

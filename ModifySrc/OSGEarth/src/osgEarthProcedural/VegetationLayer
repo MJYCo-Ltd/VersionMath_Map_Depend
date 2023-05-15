@@ -1,0 +1,455 @@
+/* -*-c++-*- */
+/* osgEarth - Geospatial SDK for OpenSceneGraph
+* Copyright 2008-2012 Pelican Mapping
+* http://osgearth.org
+*
+* osgEarth is free software; you can redistribute it and/or modify
+* it under the terms of the GNU Lesser General Public License as published by
+* the Free Software Foundation; either version 2 of the License, or
+* (at your option) any later version.
+*
+* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+* IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+* FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+* AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+* LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+* FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+* IN THE SOFTWARE.
+*
+* You should have received a copy of the GNU Lesser General Public License
+* along with this program.  If not, see <http://www.gnu.org/licenses/>
+*/
+#ifndef OSGEARTH_PROCEDURAL_GROUND_VEGETATION_LAYER_BINDLESS_H
+#define OSGEARTH_PROCEDURAL_GROUND_VEGETATION_LAYER_BINDLESS_H
+
+#include "Export"
+#include "Biome"
+#include "LifeMapLayer"
+#include "BiomeLayer"
+#include "BiomeManager"
+
+#include <osgEarth/PatchLayer>
+#include <osgEarth/LayerReference>
+#include <osgEarth/TerrainConstraintLayer>
+
+#include <osg/Drawable>
+
+namespace osgEarth { namespace Procedural
+{
+    using namespace osgEarth;
+
+    /**
+     * Layer that renders trees and undergrowth.
+     */
+    class OSGEARTHPROCEDURAL_EXPORT VegetationLayer : public PatchLayer
+    {
+    public:
+        class OSGEARTHPROCEDURAL_EXPORT Options : public PatchLayer::Options {
+        public:
+            META_LayerOptions(osgEarth, Options, PatchLayer::Options);
+
+            //! Biomes layer in the map
+            OE_OPTION_LAYER(BiomeLayer, biomeLayer);
+
+            //! Whether to render with GL_ALPHA_TO_COVERAGE
+            //! default = true
+            OE_OPTION(bool, alphaToCoverage);
+
+            //! Angle of view at which a polygon will become transparent
+            //! default = 45 degrees
+            OE_OPTION(Angle, impostorLowAngle);
+
+            //! Angle of view at which a polygon will become opaque
+            //! default = 67.5 degrees
+            OE_OPTION(Angle, impostorHighAngle);
+
+            //! Whether to use normal maps on impostor geometries
+            //! default = true
+            OE_OPTION(bool, useImpostorNormalMaps);
+
+            //! Whether to use PBR maps on impostor geometries
+            //! default = true
+            OE_OPTION(bool, useImpostorPBRMaps);
+
+            //! Whether to assume normal maps are RG-compressed
+            //! default = true;
+            OE_OPTION(bool, useRGCompressedNormalMaps);
+
+            //! Scale factor for LOD-ing the far-away impostor vegetation
+            //! default = 1.0f
+            OE_OPTION(float, farLODScale);
+
+            //! Scale factor for the LOD at which to transition from 
+            //! high-resolution 3D models up close to impostor models
+            //! at distance.
+            //! default = 1.0f
+            OE_OPTION(float, nearLODScale);
+
+            //! Amount of an LOD boundary (from near to far) should be
+            //! used to display a transition between the two LODs [0..1]
+            //! default = 0.5f
+            OE_OPTION(float, lodTransitionPadding);
+
+            //! Maximum texture size to transfer to the GPU
+            //! default = INT_MAX (no limit)
+            OE_OPTION(unsigned, maxTextureSize);
+
+            //! OSG render bin number for vegetation render bins
+            OE_OPTION(int, renderBinNumber);
+
+            struct OSGEARTHPROCEDURAL_EXPORT Group
+            {
+                //! Whether to render this group at all
+                //! default = true
+                OE_OPTION(bool, enabled);
+
+                //! Terrain LOD at which to render this group
+                OE_OPTION(unsigned, lod);
+
+                //! Not used
+                OE_OPTION(float, maxRange);
+
+                //! Number of assets to place per square kilometer
+                //! default = 4096
+                OE_OPTION(int, instancesPerSqKm);
+
+                //! Whether assets in this group cast shadows
+                //! default = false
+                OE_OPTION(bool, castShadows);
+
+                //! Percentage of overlap allowed in asset bounding spheres [0..1]
+                //! default = 0.0f
+                OE_OPTION(float, overlap);
+
+                //! Base SSE scale factor for far visibility
+                //! default = 1.0f
+                OE_OPTION(float, farLODScale);
+
+                //! Cut off for alpha discard/blend in the shader (0..1]
+                //! default = 0.2f
+                OE_OPTION(float, alphaCutoff);
+
+                // internal
+                osg::ref_ptr<osg::StateSet> _drawStateSet;
+                BiomeManager::CreateImpostorFunction _createImpostor;
+
+                Config getConfig() const;
+
+                Group();
+            };
+
+            using GroupMap = vector_map<std::string, Group>;
+            OE_PROPERTY(GroupMap, groups);
+            Group& group(const std::string& name);
+            const Group& group(const std::string& name) const;
+
+            virtual Config getConfig() const;
+        private:
+            void fromConfig(const Config& conf);
+            Group _emptyGroup;
+        };
+
+    public:
+        META_Layer(osgEarth, VegetationLayer, Options, PatchLayer, Vegetation);
+
+        //! Layer containing biome data
+        void setBiomeLayer(BiomeLayer*);
+        BiomeLayer* getBiomeLayer() const;
+
+        //! Layer containing life map data
+        void setLifeMapLayer(LifeMapLayer*);
+        LifeMapLayer* getLifeMapLayer() const;
+
+        //! LOD at which to draw ground cover
+        bool hasEnabledGroupAtLOD(unsigned lod) const;
+        std::string getGroupAtLOD(unsigned lod) const;
+        unsigned getGroupLOD(const std::string&) const;
+
+        //! Whether any of the vegetation casts shadows on the terrain
+        bool getCastShadows() const;
+
+        //! Whether to enable alpha-to-coverage mode.
+        //! Only use this when multisampling it ON
+        void setUseAlphaToCoverage(bool value);
+        bool getUseAlphaToCoverage() const;
+
+        //! Visibility range of the specified asset group
+        //! This setting will take effect to next time the layer is opened.
+        void setMaxRange(const std::string&, float);
+        float getMaxRange(const std::string&) const;
+
+        //! Whether to render the named group
+        void setEnabled(const std::string&, bool);
+        bool getEnabled(const std::string&) const;
+
+        //! Sets the allowable instance overlap percentage for a group.
+        //! Note: call dirty() to refresh after setting this value.
+        //! @param groupName Name of the group for which to set overlap
+        //! @param value Percentage [0..1] of overlap allowed.
+        void setOverlapPercentage(const std::string& group, float value);
+        float getOverlapPercentage(const std::string& group) const;
+
+        //! The threshold for discarding fragments with high alpha
+        void setAlphaCutoff(const std::string& group, float value);
+        float getAlphaCutoff(const std::string& group) const;
+
+        void setImpostorLowAngle(const Angle& value);
+        const Angle& getImpostorLowAngle() const;
+
+        void setImpostorHighAngle(const Angle& value);
+        const Angle& getImpostorHighAngle() const;
+
+        void setFarLODScale(float value);
+        float getFarLODScale() const;
+
+        void setNearLODScale(float value);
+        float getNearLODScale() const;
+
+        void setLODTransitionPadding(float value);
+        float getLODTransitionPadding() const;
+        
+        void setUseImpostorNormalMaps(bool value);
+        bool getUseImpostorNormalMaps() const;
+
+        void setUseImpostorPBRMaps(bool value);
+        bool getUseImpostorPBRMaps() const;
+
+        void setMaxTextureSize(unsigned value);
+        unsigned getMaxTextureSize() const;
+
+        //! Force regeneration of all visible data
+        void dirty();
+
+    public:
+        struct Placement
+        {
+            Placement() = default;
+            Placement(const Placement& rhs) = default;
+            Placement& operator =(Placement&& rhs) = default;
+            Placement(Placement&&) = default;
+            Placement& operator =(const Placement& rhs) = default;
+
+            //! Location in map coordinates
+            OE_PROPERTY(osg::Vec3d, mapPoint);
+
+            //! Location in tile local tangent plane coordinates
+            OE_PROPERTY(osg::Vec2d, localPoint);
+
+            //! Location in tile normalized coordinates [0..1]
+            OE_PROPERTY(osg::Vec2f, uv);
+
+            //! Scale of asset
+            OE_PROPERTY(osg::Vec3f, scale);
+
+            //! Rotation of asset in radians
+            OE_PROPERTY(float, rotation);
+
+            //! Pointer to asset model record
+            OE_PROPERTY(ResidentModelAsset::Ptr, asset);
+
+            //! Density of the LifeMap at this location
+            OE_PROPERTY(float, density);
+        };
+
+        //! Gets all the asset placement information for a given
+        //! tile within the given asset group.
+        //! @param key Tile key for which to generate asset placements
+        //! @param group Group for which to generate placements (e.g. TREES or UNDERGROWTH)
+        //! @param loadBiomesOnDemand When set to true, load the asset models necessary
+        //!   for this tile key immediately if they are not already resident. During a normal
+        //!   runtime frame loop this should be false since biome assets get loaded asynchronously.
+        //!   Set to true if you are loading asset placements without a frame loop.
+        //! @param output Output vector to populate with results
+        //! @param progress Progress/cancelation tracker
+        bool getAssetPlacements(
+            const TileKey& key,
+            const std::string& group,
+            bool loadBiomesOnDemand,
+            std::vector<Placement>& output,
+            ProgressCallback* progress) const;
+
+    protected:
+
+        virtual void init() override;
+        virtual Status openImplementation() override;
+        virtual Status closeImplementation() override;
+
+    public:
+
+        virtual void update(osg::NodeVisitor& nv) override;
+        virtual void cull(const TileBatch&, osg::NodeVisitor& nv) const override;
+
+        virtual void addedToMap(const Map* map) override;
+        virtual void removedFromMap(const Map* map) override;
+        virtual void prepareForRendering(TerrainEngine*) override;
+
+        virtual void resizeGLObjectBuffers(unsigned maxSize) override;
+        virtual void releaseGLObjects(osg::State* state) const override;
+
+    protected:
+        virtual ~VegetationLayer();
+
+        struct LayerAcceptor : public PatchLayer::AcceptCallback
+        {
+            VegetationLayer* _layer;
+            LayerAcceptor(VegetationLayer* layer) : _layer(layer) { }
+            bool acceptLayer(osg::NodeVisitor& nv, const osg::Camera* camera) const;
+            bool acceptKey(const TileKey& key) const;
+        };
+        friend struct LayerAcceptor;
+
+        LayerReference<LifeMapLayer> _lifeMapLayer;
+        LayerReference<BiomeLayer> _biomeLayer;
+        osg::observer_ptr<const Map> _map;
+
+        void reset();
+
+        // call from UPDATE peridoically to see if new biomes
+        // caused new assets to page in.
+        // Returns true if the revision changes and a job to load new
+        // assets started.
+        bool checkForNewAssets() const;
+
+        // Result of background drawable-creation jobs
+        using FutureDrawable = Future<osg::ref_ptr<osg::Drawable>>;
+
+        // Combine the TileKey and the data revision into a struct
+        // that uniquely identifies a version of a tile.
+        struct TileKeyAndRevision
+        {
+            TileKey key;
+            int revision;
+
+            bool operator == (const TileKeyAndRevision& rhs) const {
+                return key == rhs.key && revision == rhs.revision;
+            }
+            std::size_t operator()(const TileKeyAndRevision& rhs) const {
+                return hash_value_unsigned(key.hash(), revision);
+            }
+        };
+
+        // One tile's drawable vegetation.
+        struct Tile
+        {
+            using Ptr = std::shared_ptr<Tile>;
+            using WeakPtr = std::weak_ptr<Tile>;
+            FutureDrawable _drawable;
+        };
+
+        using Tiles = std::unordered_map<
+            TileKeyAndRevision,
+            Tile::Ptr,
+            TileKeyAndRevision>;
+
+        // Shared (amongst all cameras) cache of vegetation tiles,
+        // indexed by a revisioned tile key.
+        mutable Mutexed<Tiles> _tiles;
+
+        using Placeholders = std::unordered_map<
+            TileKey,
+            Tile::Ptr>;
+
+        // Shared cache of tile placeholders. These are just tiles,
+        // but indexed only by the tile key (no revision) and we 
+        // use them to draw the old version of the tile while loading
+        // a new revision.
+        // NOTE: this "shares" the _tiles mutex. Only access when the
+        // _tiles mutex is locked.
+        mutable Placeholders _placeholders;
+
+        // One camera's view on a tile (and its placeholder).
+        // We update the matrix each frame as necessary just before
+        // accepting the cull.
+        struct TileView
+        {
+            Tile::Ptr _tile;
+            Tile::Ptr _placeholder;
+            bool _loaded;
+            osg::ref_ptr<osg::RefMatrix> _matrix;
+            TileView() : _loaded(false) { }
+        };
+
+        // Data unique to a specific camera traversal
+        // (multiple views, shadow cams, etc)
+        struct CameraState
+        {
+            using Ptr = std::shared_ptr<CameraState>;
+
+            using TileViews = std::unordered_map<
+                TileKeyAndRevision,
+                TileView,
+                TileKeyAndRevision>;
+
+            // views indexed by the current key+revision
+            TileViews _views;
+        };
+
+        using CameraStates = vector_map<
+            const osg::Camera*, 
+            CameraState::Ptr>;
+
+        // Collection tile views for each camera
+        mutable Mutexed<CameraStates> _cameraState;
+
+        // So we can timeout the layer and release resources
+        mutable osg::FrameStamp _lastVisit;
+
+        // noise texture for wind
+        Texture::Ptr _noiseTex;
+
+        struct ResidentBiomeModelAssetInstances {
+            const Biome* biome;
+            std::vector<ResidentModelAssetInstance> instances;
+        };
+
+        using AssetsByBiomeId = std::unordered_map<
+            std::string, //id
+            ResidentBiomeModelAssetInstances>;
+
+        using AssetsByGroup = vector_map<
+            std::string, // group name
+            AssetsByBiomeId>;
+
+        // Asynchronously loading resident asset collection
+        mutable Future<AssetsByGroup> _newAssets;
+
+        // Resident asset collection (created by the BiomeManager)
+        mutable Mutexed<AssetsByGroup> _assets;
+
+        // Track biome changes so we can reload as necessary
+        mutable std::atomic_int _biomeRevision;
+
+        // Uniform to scale the SSE
+        osg::ref_ptr<osg::Uniform> _pixelScalesU;
+
+        void configureImpostor(
+            const std::string& groupName);
+
+        Future<osg::ref_ptr<osg::Drawable>> createDrawableAsync(
+            const TileKey&,
+            const std::string&,
+            const osg::BoundingBox& bbox,
+            const osg::FrameStamp*,
+            double explicit_birthday,
+            float range) const;
+
+        osg::ref_ptr<osg::Drawable> createDrawable(
+            const TileKey&,
+            const std::string&,
+            const osg::BoundingBox& bbox,
+            ProgressCallback* c) const;
+
+        // Things that help us detect the presence of multisampling
+        mutable bool _requestMultisampling;
+        bool _multisamplingActivated;
+        void activateMultisampling();
+
+        TerrainConstraintQuery _constraintQuery;
+        Revision _mapRevision;
+    };
+
+} } // namespace osgEarth::Procedural
+
+OSGEARTH_SPECIALIZE_CONFIG(osgEarth::Procedural::VegetationLayer::Options);
+
+#endif // OSGEARTH_PROCEDURAL_GROUND_VEGETATION_LAYER_H

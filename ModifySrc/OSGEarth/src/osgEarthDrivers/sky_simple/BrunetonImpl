@@ -1,0 +1,166 @@
+/* -*-c++-*- */
+/* osgEarth - Geospatial SDK for OpenSceneGraph
+ * Copyright 2020 Pelican Mapping
+ * http://osgearth.org
+ *
+ * osgEarth is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU Lesser General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU Lesser General Public License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public License
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>
+ */
+#pragma once
+
+#include <osg/Drawable>
+#include <osg/Texture2D>
+#include <osg/Texture3D>
+#include <osgEarth/TerrainResources>
+#include "eb_atmosphere_model.h"
+
+/**
+ * OSG "connector" for the "Precomputed Atmospheric Scattering" 
+ * implemenentation by Eric Bruneton and Fabrice Neyret.
+ *
+ * References:
+ *
+ * Original paper: https://hal.inria.fr/inria-00288758/en
+ * Reference implementation: https://github.com/ebruneton/precomputed_atmospheric_scattering
+ * Documentation: https://ebruneton.github.io/precomputed_atmospheric_scattering
+ * Unity implementation: https://github.com/Scrawk/Brunetons-Improved-Atmospheric-Scattering
+ * OpenGL/GLSL port of Unity implementation: https://github.com/diharaw/BrunetonSkyModel
+ *
+ * This implementation is based on the final reference (diharaw).
+ * Copyright notices are found throughout the code in the appropriate files.
+ *
+ * Some options don't work for reasons unknown. The defaults are configured
+ * to avoid these options for now. These include:
+ *
+ *   1. combining the rayleigh and mie scattering data into a single texture
+ *   2. disabling luminance
+ *   3. half-precision textures
+ *
+ * Possible future work items:
+ *
+ *   1. Putt the LUTs into bindless textures so the impl doesn't
+ *      require 4 texture image units
+ *   2. Resolve some of the artifacts that appear when you introduce
+ *      "ambient" lighting at night
+ *   3. Combine with the shadowing pass to implement integrated 
+ *      shadows and light shafts
+ *   4. Better lighting of double-sided/translucent geometry (like
+ *      tree leaves)
+ */
+namespace Bruneton
+{
+    class ComputeDrawable : public osg::Drawable
+    {
+    public:
+        ComputeDrawable(
+            float bottom_radius,
+            float top_radius,
+            bool high_quality = false);
+
+        // runs the pre-computation
+        void drawImplementation(osg::RenderInfo& ri) const override;
+
+        bool isReady() const {
+            return _model != nullptr;
+        }
+
+        // builds the rendering statesets
+        bool populateRenderingStateSets(
+            osg::StateSet* groundStateSet,
+            osg::StateSet* skyStateSet,
+            osgEarth::TerrainResources* resources) const;
+
+        mutable std::unique_ptr<dw::AtmosphereModel> _model;
+        mutable osg::Vec3f _white_point;
+
+        bool _use_half_precision;
+        float _sun_angle;
+        bool _use_constant_solar_spectrum;
+        bool _use_ozone;
+        bool _use_combined_textures;
+        bool _use_luminance;
+        bool _do_white_balance;
+
+        float _sun_angular_radius;
+        float _bottom_radius;
+        float _top_radius;
+        float _length_unit_in_meters;
+
+        bool _best_quality;
+
+        mutable osg::ref_ptr<osg::Texture>
+            _transmittance_tex,
+            _scattering_tex,
+            _irradiance_tex,
+            _single_mie_scattering_tex;
+
+    private:
+        osg::Texture* makeOSGTexture(dw::Texture*) const;
+
+        mutable osgEarth::TextureImageUnitReservation _reservation[4];
+    };
+
+    // Wraps a raw GL texture in an osg texture
+    struct WrapTexture2D : osg::Texture2D {
+        WrapTexture2D(dw::Texture2D* t) : osg::Texture2D(), _internal(t) {
+            setFilter(MIN_FILTER, LINEAR);
+            setWrap(WRAP_S, CLAMP_TO_EDGE);
+            setWrap(WRAP_T, CLAMP_TO_EDGE);
+            setWrap(WRAP_R, CLAMP_TO_EDGE);
+        }
+        void apply(osg::State& state) const override {
+            if (getTextureObject(state.getContextID()) == nullptr) {
+                const_cast<WrapTexture2D*>(this)->setTextureObject(state.getContextID(),
+                    new osg::Texture::TextureObject(
+                        const_cast<WrapTexture2D*>(this),
+                        _internal->id(),
+                        _internal->target(),
+                        _internal->mip_levels(),
+                        _internal->internal_format(),
+                        _internal->width(),
+                        _internal->height(),
+                        1, // depth,
+                        0)); // border
+            }
+            osg::Texture2D::apply(state);
+        }
+        dw::Texture2D* _internal;
+    };
+
+    // Wraps a raw GL texture in an osg texture
+    struct WrapTexture3D : osg::Texture3D {
+        WrapTexture3D(dw::Texture3D* t) : osg::Texture3D(), _internal(t) {
+            setFilter(MIN_FILTER, LINEAR);
+            setWrap(WRAP_S, CLAMP_TO_EDGE);
+            setWrap(WRAP_T, CLAMP_TO_EDGE);
+            setWrap(WRAP_R, CLAMP_TO_EDGE);
+        }
+        void apply(osg::State& state) const override {
+            if (getTextureObject(state.getContextID()) == nullptr) {
+                const_cast<WrapTexture3D*>(this)->setTextureObject(state.getContextID(),
+                    new osg::Texture::TextureObject(
+                        const_cast<WrapTexture3D*>(this),
+                        _internal->id(),
+                        _internal->target(),
+                        _internal->mip_levels(),
+                        _internal->internal_format(),
+                        _internal->width(),
+                        _internal->height(),
+                        _internal->depth(), // depth,
+                        0)); // border
+            }
+            osg::Texture3D::apply(state);
+        }
+        dw::Texture3D* _internal;
+    };
+} // namespace Bruneton

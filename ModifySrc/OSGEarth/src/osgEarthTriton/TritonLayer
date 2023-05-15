@@ -1,0 +1,122 @@
+/* -*-c++-*- */
+/* osgEarth - Geospatial SDK for OpenSceneGraph
+ * Copyright 2020 Pelican Mapping
+ * http://osgearth.org
+ *
+ * osgEarth is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU Lesser General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU Lesser General Public License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public License
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>
+ */
+#ifndef OSGEARTH_TRITON_LAYER
+#define OSGEARTH_TRITON_LAYER 1
+
+#include "Common"
+
+#include <osgEarth/VisibleLayer>
+#include <osgEarth/LayerReference>
+#include <osgEarth/ImageLayer>
+#include <osgEarthTriton/TritonCallback>
+#include <osgEarthTriton/TritonIntersections>
+
+namespace osgEarth { namespace Triton
+{
+    /**
+     * Node that roots the Triton adapter.
+     */
+    class OSGEARTHTRITON_EXPORT TritonLayer : public osgEarth::VisibleLayer
+    {
+    public:
+        class OSGEARTHTRITON_EXPORT Options : public osgEarth::VisibleLayer::Options {
+        public:
+            META_LayerOptions(osgEarth, Options, osgEarth::VisibleLayer::Options);
+            OE_OPTION(std::string, user);
+            OE_OPTION(std::string, licenseCode);
+            OE_OPTION(std::string, resourcePath);
+            OE_OPTION(bool, useHeightMap);
+            OE_OPTION(unsigned, heightMapSize);
+            OE_OPTION(int, renderBinNumber);
+            OE_OPTION(float, maxAltitude);
+            OE_OPTION_LAYER(osgEarth::ImageLayer, maskLayer);
+            virtual Config getConfig() const;
+        private:
+            void fromConfig(const Config& conf);
+        };
+
+    public:
+        META_Layer(osgEarth, TritonLayer, Options, osgEarth::VisibleLayer, triton);
+
+        //! Sets the user callback that's invoked when Triton start up
+        void setUserCallback(Triton::Callback* callback);
+
+        //! User name for license
+        void setUserName(const std::string& value);
+        const std::string& getUserName() const;
+
+        //! License code
+        void setLicenseCode(const std::string& value);
+        const std::string& getLicenseCode() const;
+
+        //! Triton resource path
+        void setResourcePath(const std::string& value);
+        const std::string& getResourcePath() const;
+
+        //! Whether to use a height map to fade out the ocean at the coastline
+        void setUseHeightMap(const bool& value);
+        const bool& getUseHeightMap() const;
+
+        //! Size in texels of the height map (each dimension)
+        void setHeightMapSize(const unsigned& value);
+        const unsigned& getHeightMapSize() const;
+
+        //! Render bin number to use for the ocean rendering
+        void setRenderBinNumber(const int& value);
+        const int& getRenderBinNumber() const;
+
+        //! Masking layer for the ocean
+        void setMaskLayer(osgEarth::ImageLayer* maskLayer);
+        osgEarth::ImageLayer* getMaskLayer() const;
+
+        //! Maximum visibility altitude
+        void setMaxAltitude(const float& value);
+        const float& getMaxAltitude() const;
+
+        //! Adds an intersection set.
+        //! Each frame, Triton will perform intersections against the ocean surface
+        //! (including the waves) and populate the set with the results.
+        void addIntersections(TritonIntersections*);
+
+    public: // Layer
+
+        virtual osg::Node* getNode() const;
+
+        //! Serialize
+        virtual Config getConfig() const;
+
+    protected: // Layer
+
+        virtual void init();
+
+        virtual void addedToMap(const class osgEarth::Map*);
+
+        virtual void removedFromMap(const class osgEarth::Map*);
+
+    private:
+
+        osg::ref_ptr<osg::Group> _root;
+        osg::ref_ptr<osg::Node> _tritonNode;
+        float _seaLevel;
+        float _opacity;
+    };
+
+} } // namespace osgEarth::Triton
+
+#endif // OSGEARTH_TRITON_LAYER

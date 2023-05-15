@@ -1,0 +1,58 @@
+/* -*-c++-*- */
+/* osgEarth - Geospatial SDK for OpenSceneGraph
+* Copyright 2008-2014 Pelican Mapping
+* http://osgearth.org
+*
+* osgEarth is free software; you can redistribute it and/or modify
+* it under the terms of the GNU Lesser General Public License as published by
+* the Free Software Foundation; either version 2 of the License, or
+* (at your option) any later version.
+*
+* This program is distributed in the hope that it will be useful,
+* but WITHOUT ANY WARRANTY; without even the implied warranty of
+* MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+* GNU Lesser General Public License for more details.
+*
+* You should have received a copy of the GNU Lesser General Public License
+* along with this program.  If not, see <http://www.gnu.org/licenses/>
+*/
+#ifndef OSGEARTH_LOADABLE_NODE_H
+#define OSGEARTH_LOADABLE_NODE_H
+
+#include <osgEarth/Export>
+#include <osgEarth/RefinePolicy>
+
+namespace osgEarth
+{
+    /**
+     * Pure interface for a node that can load or unload data.
+     */
+    class /*interface*/ LoadableNode
+    {
+    public:
+        //! Instruct the object to load its payload
+        virtual void load() = 0;
+
+        //! Instruct the object to discard its payload
+        virtual void unload() = 0;
+
+        //! How to behave when higher resolution data is loaded
+        virtual RefinePolicy getRefinePolicy() const = 0;
+
+        //! Whether this node's payload was succesfully loaded
+        virtual bool isLoaded() const = 0;
+
+        //! Whether the payload associated with this node is the highest
+        //! resolution and no higher resolution data is available
+        virtual bool isHighestResolution() const = 0;
+
+        //! Whether to automatically discard the payload when the
+        //! system determines that this node is not currently in use
+        virtual bool getAutoUnload() const = 0;
+
+        //! Whether to automatically discard the payload when the
+        //! system determines that this node is not currently in use
+        virtual void setAutoUnload(bool value) = 0;
+    };
+}
+#endif

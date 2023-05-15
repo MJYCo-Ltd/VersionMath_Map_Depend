@@ -1,0 +1,294 @@
+/* -*-c++-*- */
+/* osgEarth - Geospatial SDK for OpenSceneGraph
+* Copyright 2008-2012 Pelican Mapping
+* http://osgearth.org
+*
+* osgEarth is free software; you can redistribute it and/or modify
+* it under the terms of the GNU Lesser General Public License as published by
+* the Free Software Foundation; either version 2 of the License, or
+* (at your option) any later version.
+*
+* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+* IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+* FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+* AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+* LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+* FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+* IN THE SOFTWARE.
+*
+* You should have received a copy of the GNU Lesser General Public License
+* along with this program.  If not, see <http://www.gnu.org/licenses/>
+*/
+#ifndef OSGEARTH_SPLAT_GROUND_COVER_LAYER_H
+#define OSGEARTH_SPLAT_GROUND_COVER_LAYER_H
+
+#include "Export"
+#include "Biome"
+#include "OldInstanceCloud"
+
+#include <osgEarth/PatchLayer>
+#include <osgEarth/LayerReference>
+#include <osgEarth/LandCoverLayer>
+#include <osgEarth/VirtualProgram>
+
+namespace osgEarth { namespace Splat
+{
+    using namespace osgEarth;
+
+    //! Layer that renders billboards on the ground using the GPU,
+    //! like trees, grass, rocks, etc.
+    class OSGEARTHSPLAT_EXPORT GroundCoverLayer : public PatchLayer
+    {
+    public:
+        class OSGEARTHSPLAT_EXPORT Options : public PatchLayer::Options {
+        public:
+            META_LayerOptions(osgEarth, Options, PatchLayer::Options);
+            OE_OPTION_LAYER(ImageLayer, maskLayer);
+            OE_OPTION_LAYER(ImageLayer, colorLayer);
+            OE_OPTION(float, colorMinSaturation);
+            OE_OPTION(unsigned, lod);
+            OE_OPTION(bool, castShadows);
+            OE_OPTION(float, maxAlpha);
+            OE_OPTION(bool, alphaToCoverage);
+            OE_OPTION_VECTOR(BiomeZone, biomeZones);
+            OE_OPTION(float, windScale);
+            virtual Config getConfig() const;
+        private:
+            void fromConfig(const Config& conf);
+        };
+
+    public:
+        META_Layer(osgEarthSplat, GroundCoverLayer, Options, PatchLayer, GroundCover);
+
+        //! Layer containing required coverage data
+        void setLandCoverLayer(LandCoverLayer* landCoverLayer);
+        LandCoverLayer* getLandCoverLayer() const;
+
+        //! Layer containing the land cover dictionary.
+        void setLandCoverDictionary(LandCoverDictionary* landCoverDict);
+        LandCoverDictionary* getLandCoverDictionary() const;
+
+        //! Masking layer (optional)
+        void setMaskLayer(ImageLayer* layer);
+        ImageLayer* getMaskLayer() const;
+
+        //! Color modulation layer
+        void setColorLayer(ImageLayer* layer);
+        ImageLayer* getColorLayer() const;
+
+        //! LOD at which to draw ground cover
+        void setLOD(unsigned value);
+        unsigned getLOD() const;
+
+        //! Geogrphic zones; at least one is required
+        std::vector<BiomeZone>& getZones() { return options().biomeZones(); }
+        const std::vector<BiomeZone>& getZones() const { return options().biomeZones(); }
+
+        //! Whether the ground cover casts shadows on the terrain
+        void setCastShadows(bool value);
+        bool getCastShadows() const;
+
+        //! Transparency threshold below which to discard fragments.
+        //! Only applies when alpha-to-coverage mode is OFF.
+        void setMaxAlpha(float value);
+        float getMaxAlpha() const;
+
+        //! Whether to enable alpha-to-coverage mode.
+        //! Only use this when multisampling it ON
+        void setUseAlphaToCoverage(bool value);
+        bool getUseAlphaToCoverage() const;
+
+    protected:
+
+        //! Override post-ctor init
+        virtual void init() override;
+
+        //! Override layer open
+        virtual Status openImplementation() override;
+
+        virtual Status closeImplementation() override;
+
+        virtual void prepareForRendering(TerrainEngine*) override;
+
+
+    public: // PatchLayer API
+
+        TileRenderer* getRenderer() const override {
+            return _renderer.get();
+        }
+
+    public:
+
+        //! Update traversal
+        virtual void update(osg::NodeVisitor& nv) override;
+
+        //! Called when this layer is added to the map
+        virtual void addedToMap(const Map* map) override;
+        virtual void removedFromMap(const Map* map) override;
+
+        virtual void resizeGLObjectBuffers(unsigned maxSize) override;
+        virtual void releaseGLObjects(osg::State* state) const override;
+
+    protected:
+        virtual ~GroundCoverLayer();
+
+        LayerReference<LandCoverDictionary> _landCoverDict;
+        LayerReference<LandCoverLayer> _landCoverLayer;
+
+        TextureImageUnitReservation _groundCoverTexBinding;
+        TextureImageUnitReservation _noiseBinding;
+
+        //Zones _zones;
+        //bool _zonesConfigured;
+
+        void buildStateSets();
+
+        struct LayerAcceptor : public PatchLayer::AcceptCallback
+        {
+            GroundCoverLayer* _layer;
+            LayerAcceptor(GroundCoverLayer* layer) : _layer(layer) { }
+            bool acceptLayer(osg::NodeVisitor& nv, const osg::Camera* camera) const override;
+            bool acceptKey(const TileKey& key) const override;
+        };
+        friend struct LayerAcceptor;
+
+        struct ZoneSelector : public Layer::TraversalCallback
+        {
+            GroundCoverLayer* _layer;
+            ZoneSelector(GroundCoverLayer* layer) : _layer(layer) { }
+            void operator()(osg::Node*, osg::NodeVisitor*) const override;
+        };
+        friend struct ZoneSelector;
+
+        // Custom GL renderer for ground cover
+        struct Renderer : public TileRenderer
+        {
+            Renderer(GroundCoverLayer* layer);
+            
+            struct UniformState
+            {
+                UniformState();
+
+                int _numInstances1D;
+
+                GLint _computeDataUL;
+                float _computeData[5];
+
+                GLint _A2CUL;
+
+                unsigned _tileCounter;
+            };
+
+            // Tracks a GL state to minimize state changes
+            struct DrawState
+            {
+                // Geometry differs by zone/groundcover settings
+                using InstancerPerGroundCover = std::unordered_map<const void*, osg::ref_ptr<LegacyInstanceCloud>>;
+                InstancerPerGroundCover _instancers;
+
+                Renderer* _renderer;
+
+                using UniformsPerPCP = std::unordered_map<const void*, UniformState>;
+                UniformsPerPCP _uniforms;
+
+                osg::Matrixd _mvp;
+                std::size_t _lastTileBatchID;
+            };
+
+            // one per graphics context
+            mutable osg::buffered_object<DrawState> _drawStateBuffer;
+
+            // uniform IDs
+            unsigned _computeDataUName;
+            unsigned _A2CName;
+
+            void applyLocalState(osg::RenderInfo& ri, DrawState& ds);
+
+            // TileRenderer:
+            void draw(osg::RenderInfo& ri, const TileBatch& tiles) override;
+            // DrawCallback API
+            //void visitTileBatch(osg::RenderInfo& ri, const TileBatch* tiles) override;
+            //void visitTile(osg::RenderInfo& ri, const DrawContext& tile) override;
+            void visitTile(osg::RenderInfo& ri, const TileState* tile);
+
+            void resizeGLObjectBuffers(unsigned maxSize);
+            void releaseGLObjects(osg::State* state) const;
+
+            double _tileWidth;
+            GroundCoverLayer* _layer;
+            osg::ref_ptr<osg::StateAttribute> _a2cBlending;
+
+            unsigned _pass;
+
+            osg::ref_ptr<osg::StateSet> _computeStateSet;
+            osg::Program* _computeProgram;
+            int _counter;
+            float _spacing;
+
+            std::atomic<int> _frameLastActive;
+        };
+
+        std::shared_ptr<Renderer> _renderer;
+        bool _isModel;
+        bool _debug;
+        osg::ref_ptr<osg::Drawable> _debugDrawable;
+        osg::ref_ptr<osg::Texture> _atlas;
+        int _frameLastUpdate;
+
+        struct PerCameraData {
+            const osg::StateAttribute* _previousZoneSA;
+            const osg::StateAttribute* _currentZoneSA;
+        };
+        mutable PerObjectFastMap<const osg::Camera*, PerCameraData> _perCamera;
+
+        virtual void loadShaders(
+            VirtualProgram* vp,
+            const osgDB::Options* options) const;
+
+        virtual osg::Geometry* createGeometry() const;
+
+        osg::Shader* createLUTShader() const;
+
+        struct AssetData : public osg::Referenced
+        {
+            osg::ref_ptr<osg::Image> _sideImage;
+            osg::ref_ptr<osg::Image> _topImage;
+            osg::ref_ptr<osg::Node> _model;
+
+            const BiomeZone* _zone;
+            const LandCoverGroup* _landCoverGroup;
+            const AssetUsage* _asset;
+
+            int _zoneIndex;
+            int _landCoverGroupIndex;
+
+            // texture atlas indexes
+            int _sideImageAtlasIndex;
+            int _topImageAtlasIndex;
+            int _modelAtlasIndex;
+
+            // number of instances of this asset (for selection weight purposes)
+            int _numInstances;
+            std::vector<int> _codes;
+
+        };
+
+        void loadAssets();
+        typedef std::vector<osg::ref_ptr<AssetData> > AssetDataVector;
+        AssetDataVector _liveAssets;
+
+        typedef std::vector<osg::ref_ptr<osg::Image> > ImageVector;
+        ImageVector _atlasImages;
+
+        osg::Texture* createTextureAtlas() const;
+
+        osg::StateSet* getZoneStateSet(unsigned index) const;
+        std::vector<osg::ref_ptr<osg::StateSet> > _zoneStateSets;
+
+        bool shouldEnableTopDownBillboards() const;
+    };
+
+} } // namespace osgEarth::Splat
+OSGEARTH_SPECIALIZE_CONFIG(osgEarth::Splat::GroundCoverLayer::Options);
+
+#endif // OSGEARTH_SPLAT_GROUND_COVER_LAYER_H

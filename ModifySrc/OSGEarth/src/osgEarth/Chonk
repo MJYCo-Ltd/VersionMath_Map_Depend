@@ -1,0 +1,398 @@
+/* -*-c++-*- */
+/* osgEarth - Geospatial SDK for OpenSceneGraph
+* Copyright 2020 Pelican Mapping
+* http://osgearth.org
+*
+* osgEarth is free software; you can redistribute it and/or modify
+* it under the terms of the GNU Lesser General Public License as published by
+* the Free Software Foundation; either version 2 of the License, or
+* (at your option) any later version.
+*
+* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+* IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+* FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+* AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+* LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+* FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+* IN THE SOFTWARE.
+*
+* You should have received a copy of the GNU Lesser General Public License
+* along with this program.  If not, see <http://www.gnu.org/licenses/>
+*/
+#ifndef OSGEARTH_CHONK
+#define OSGEARTH_CHONK 1
+
+#include <osgEarth/Common>
+#include <osgEarth/GLUtils>
+#include <osgEarth/TextureArena>
+#include <osgEarth/Utils>
+#include <osgUtil/RenderLeaf>
+#include <osgUtil/RenderBin>
+#include <vector>
+#include <unordered_set>
+#include <unordered_map>
+
+namespace osgEarth
+{
+    class OSGEARTH_EXPORT ChonkMaterial
+    {
+    public:
+        using Ptr = std::shared_ptr<ChonkMaterial>;
+        static Ptr create() {
+            return Ptr(new ChonkMaterial);
+        }
+
+        // texturearena indexes of material textures
+        int albedo_index;
+        int normal_index;
+        int pbr_index;
+
+        // store refs to the original textures when the
+        // factory objects's texture arena is using auto-release.
+        // otherwise they are null.
+        Texture::Ptr albedo_tex;
+        Texture::Ptr normal_tex;
+        Texture::Ptr pbr_tex;
+
+    private:
+        ChonkMaterial() : 
+            albedo_index(-1), normal_index(-1), pbr_index(-1) { }
+    };
+
+    class ChonkFactory;
+
+    /**
+     * A bindless rendering unit comprised of one VBO and one EBO.
+     * A single Chonk usually represents one drawable "Object" in
+     * the scene. It can include multiple LODs.
+     */
+    class OSGEARTH_EXPORT Chonk
+    {
+    public:
+        using element_t = GLuint;
+
+        //! Adds a node.
+        bool add(
+            osg::Node*,
+            ChonkFactory& factory);
+
+        //! Adds a node with screen-space-error limits.
+        bool add(
+            osg::Node* node,
+            float far_pixel_scale,
+            float near_pixel_scale,
+            ChonkFactory& factory);
+
+        //! Local bounding box of this Chonk.
+        const osg::BoundingBoxf& getBound();
+
+    public:
+        //! Single vertex data.
+        struct VertexGPU
+        {
+            osg::Vec3f position;
+            osg::Vec3f normal;
+            char normal_technique;
+            osg::Vec4ub color;
+            osg::Vec2f uv;
+            osg::Vec3f flex;
+
+            // texturearena indexes of materials
+            // TODO: use a material index instead?
+            GLshort albedo_index;
+            GLshort normalmap_index;
+            GLshort pbr_index;
+
+            VertexGPU() : 
+                normal_technique(0),
+                albedo_index(-1),
+                normalmap_index(-1),
+                pbr_index(-1) {}
+        };
+
+        static GLubyte NORMAL_TECHNIQUE_DEFAULT;
+        static GLubyte NORMAL_TECHNIQUE_ZAXIS;
+        static GLubyte NORMAL_TECHNIQUE_HEMISPHERE;
+
+        //! Geometry variant for a given pixel size range
+        struct LOD
+        {
+            unsigned offset;
+            std::size_t length;
+            float far_pixel_scale;
+            float near_pixel_scale;
+        };
+
+    public:
+        using Ptr = std::shared_ptr<Chonk>;
+        using WeakPtr = std::weak_ptr<Chonk>;
+
+        //! Creates a new empty chonk.
+        static Ptr create();
+
+        std::vector<ChonkMaterial::Ptr> _materials;
+        std::vector<VertexGPU> _vbo_store;
+        std::vector<element_t> _ebo_store;
+        std::vector<LOD> _lods;
+        osg::BoundingBoxf _box;
+
+        // Customed draw command
+        using DrawCommand = DrawElementsIndirectBindlessCommandNV;
+        using DrawCommands = std::vector<DrawCommand>;
+
+        //! GL objects that can be used across shared GCs
+        //! (because they are static and they are bindless)
+        struct GLObjects : public ShareableGLObjects
+        {
+            GLBuffer::Ptr vbo;
+            GLBuffer::Ptr ebo;
+            DrawCommands commands;
+        };
+        mutable osg::buffered_object<GLObjects> _globjects;
+
+        //! Gets (or creates) a draw command, possibly
+        //! resolving texture handles and uploading buffers.
+        const DrawCommands& getOrCreateCommands(osg::State&) const;
+
+    private:
+        Chonk();
+
+        friend class ChonkFactory;
+        friend class ChonkDrawable;
+    };
+
+    /**
+     * Converts OSG geometry into Chonk data.
+     */
+    class OSGEARTH_EXPORT ChonkFactory
+    {
+    public:
+        using GetOrCreateFunction =
+            std::function<Texture::Ptr(osg::Texture* osgTex, bool& isNew)>;
+
+    public:
+        ChonkFactory(
+            TextureArena* textures);
+
+        //! User function that can try to find textures instead of
+        //! creating new ones. Good for sharing data across invocations.
+        void setGetOrCreateFunction(GetOrCreateFunction);
+
+        //! Adds a node and generates an asset drawable for it.
+        //! The asset will upload to the GPU on the next call to apply.
+        void load(
+            osg::Node* node,
+            Chonk& chonk);
+
+    private:
+        osg::ref_ptr<TextureArena> _textures;
+        GetOrCreateFunction _getOrCreateTexture;
+    };
+
+    /**
+     * Renders batches of chonks with gpu culling.
+     */
+    class OSGEARTH_EXPORT ChonkDrawable : public osg::Drawable
+    {
+    public:
+        META_Node(osgEarth, ChonkDrawable);
+
+        using Vector = std::vector<osg::ref_ptr<ChonkDrawable>>;
+
+    public:
+        //! Construct a default drawable
+        //! @param renderBinNumber OSG render bin number for the drawable
+        ChonkDrawable(int render_bin_number = 3);
+
+        //! Adds one instance of a chonk to the drawable.
+        void add(Chonk::Ptr value);
+
+        //! Adds an instance of a chonk to the drawable.
+        void add(
+            Chonk::Ptr value,
+            const osg::Matrixf& xform);
+
+        //! Adds a chonk instance to the drawable, along with
+        //! a tile-local UV coordinate. You only need this if you
+        //! intend to set a custom culling shader.
+        void add(
+            Chonk::Ptr value,
+            const osg::Matrixf& xform,
+            const osg::Vec2f& local_uv);
+
+        //! The timestamp at which this drawable was first created.
+        //! Used for new data fade-in.
+        void setBirthday(double value);
+        double getBirthday() const;
+
+        //! Set the camera distances for distance-based fading.
+        void setFadeNearFar(float nearDist, float farDist);
+
+        //! Sets the cutoff value for transparency
+        void setAlphaCutoff(float value);
+
+        //! Whether to GPU cull on the per-chonk basis.
+        //! Default is true.
+        void setUseGPUCulling(bool value);
+
+        //! Render bin number to use for this drawable
+        void setRenderBinNumber(int value);
+        int getRenderBinNumber() const;
+
+        //! Installs a basic chonk-rendering shader on a drawable.
+        static void installRenderBin(ChonkDrawable*);
+
+    public:
+
+        virtual osg::BoundingBox computeBoundingBox() const override;
+        virtual osg::BoundingSphere computeBound() const override;
+        virtual void drawImplementation(osg::RenderInfo& ri) const override;
+        virtual void resizeGLObjectBuffers(unsigned) override;
+        virtual void releaseGLObjects(osg::State*) const override;
+
+    protected:
+        virtual ~ChonkDrawable();
+
+        mutable Mutex _m;
+
+        // Keep me 16-byte aligned
+        struct Instance
+        {
+            osg::Matrixf xform; // local xform
+            osg::Vec2f uv; // tile-local UV
+            GLuint lod;
+            float visibility[2]; // per LOD
+            float radius; // per chonk
+            float alphaCutoff;
+            GLuint first_lod_cmd_index;
+        };
+        using Instances = std::vector<Instance>;
+        using Batches = std::unordered_map<Chonk::Ptr, Instances>;
+        Batches _batches;
+        bool _gpucull;
+        float _fadeNear, _fadeFar;
+        double _birthday;
+        float _alphaCutoff;
+        int _renderBinNumber;
+
+        //! GL objects (and supporting data structures) that must
+        //! be stored and managed for each unique GL state/context,
+        //! since they will differ for each view based on the camera
+        //! location and will potentially change every frame.
+        struct GLObjects : public PerStateGLObjects
+        {
+            // GPU variant/lod def. Keep me 16-byte aligned.
+            struct ChonkLOD
+            {
+                osg::Vec3f center;
+                GLfloat radius;
+                GLfloat far_pixel_scale;
+                GLfloat near_pixel_scale;
+                GLfloat alpha_cutoff;
+                GLfloat birthday;
+                GLfloat fade_near;
+                GLfloat fade_far;
+                GLuint num_lods; // chonk-global
+                GLuint total_num_commands; // global
+            };
+
+            // re-usable arrays
+            std::vector<Chonk::DrawCommand> _commands;
+            std::vector<Instance> _all_instances;
+            std::vector<ChonkLOD> _chonk_lods;
+
+            std::size_t _numInstances;
+            std::size_t _maxNumLODs;
+            osg::GLExtensions* _ext;
+            GLVAO::Ptr _vao;
+            GLBuffer::Ptr _commandBuf;
+            GLBuffer::Ptr _instanceInputBuf;
+            GLBuffer::Ptr _instanceOutputBuf;
+            GLBuffer::Ptr _chonkBuf;
+            bool _dirty;
+            bool _gpucull;
+
+            void(GL_APIENTRY * _glMultiDrawElementsIndirectBindlessNV)
+                (GLenum, GLenum, const GLvoid*, GLsizei, GLsizei, GLint);
+
+            struct PCPState {
+                GLint _passUL;
+                PCPState() : _passUL(-1) { }
+            };
+            mutable std::unordered_map<const void*, PCPState> _pcps;
+
+            GLObjects();
+            void initialize(
+                const osg::Object* host, osg::State& state);
+            void update(
+                const Batches&, const osg::Object* host,
+                float fadeNear, float fadeFar,
+                double birthday, float alphaCutoff,
+                osg::State&);
+            void cull(osg::State& state);
+            void draw(osg::State& state);
+            void release();
+        };
+        mutable osg::buffered_object<GLObjects> _globjects;
+
+        void update_and_cull_batches(osg::State& state) const;
+
+        void draw_batches(osg::State& state) const;
+
+        void dirtyGLObjects();
+
+    public:
+        // support intersectors and stats visitors
+        bool supports(const osg::PrimitiveFunctor& f) const override { return true; }
+        virtual void accept(osg::PrimitiveFunctor&) const override;
+
+    private:
+        mutable bool _proxy_dirty;
+        mutable std::vector<osg::Vec3f> _proxy_verts;
+        mutable std::vector<GLuint> _proxy_indices;
+        void refreshProxy() const;
+        ChonkDrawable(const ChonkDrawable& rhs, const osg::CopyOp&) { }
+
+        friend class ChonkRenderBin;
+    };
+
+    /**
+     * Custom renderbin for rendering ChonkDrawables en masse
+     * Called "ChonkBin"
+     */
+    class OSGEARTH_EXPORT ChonkRenderBin : public osgUtil::RenderBin
+    {
+    public:
+        ChonkRenderBin();
+        ChonkRenderBin(const ChonkRenderBin& rhs, const osg::CopyOp& op);
+
+        void drawImplementation(
+            osg::RenderInfo& renderInfo,
+            osgUtil::RenderLeaf*&) override;
+
+        virtual osg::Object* cloneType() const override { return new ChonkRenderBin(); }
+        virtual osg::Object* clone(const osg::CopyOp& copyop) const override { return new ChonkRenderBin(*this, copyop); } // note only implements a clone of type.
+        virtual bool isSameKindAs(const osg::Object* obj) const override { return dynamic_cast<const ChonkRenderBin*>(obj) != 0L; }
+        virtual const char* libraryName() const override { return "osgEarth"; }
+        virtual const char* className() const override { return "ChonkRenderBin"; }
+
+    private:
+        osg::ref_ptr<osg::StateSet> _cullSS;
+
+        friend class ChonkDrawable;
+
+        osg::ref_ptr<osgUtil::StateGraph> _cull_sg;
+
+        struct CullLeaf : public Util::CustomRenderLeaf {
+            CullLeaf(osgUtil::RenderLeaf*);
+            void draw(osg::State&) override;
+        };
+        struct DrawLeaf : public Util::CustomRenderLeaf {
+            DrawLeaf(osgUtil::RenderLeaf*, bool, bool);
+            void draw(osg::State&) override;
+            bool _first, _last;
+        };
+    };
+}
+
+#endif // OSGEARTH_INSTANCE_CLOUD

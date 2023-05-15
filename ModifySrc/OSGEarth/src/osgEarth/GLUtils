@@ -1,0 +1,992 @@
+/* -*-c++-*- */
+/* osgEarth - Geospatial SDK for OpenSceneGraph
+* Copyright 2020 Pelican Mapping
+* http://osgearth.org
+*
+* osgEarth is free software; you can redistribute it and/or modify
+* it under the terms of the GNU Lesser General Public License as published by
+* the Free Software Foundation; either version 2 of the License, or
+* (at your option) any later version.
+*
+* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+* IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+* FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+* AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+* LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+* FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+* IN THE SOFTWARE.
+*
+* You should have received a copy of the GNU Lesser General Public License
+* along with this program.  If not, see <http://www.gnu.org/licenses/>
+*/
+
+#ifndef OSGEARTH_GLUTILS_H
+#define OSGEARTH_GLUTILS_H 1
+
+#include <osgEarth/Common>
+#include <osgEarth/optional>
+#include <osgEarth/Threading>
+#include <osgEarth/Math>
+#include <osg/StateSet>
+#include <osg/OperationThread>
+#include <osg/GraphicsContext>
+#include <osg/GLObjects>
+#include <osg/Drawable>
+#include <osg/Texture2D>
+#include <osg/ContextData>
+#include <set>
+
+#ifndef GLintptr
+#define GLintptr std::intptr_t
+#endif
+#ifndef GLsizeiptr
+#define GLsizeiptr std::uintptr_t
+#endif
+
+#ifndef GL_DYNAMIC_STORAGE_BIT
+#define GL_DYNAMIC_STORAGE_BIT 0x0100
+#endif
+
+namespace osgUtil {
+    class StateToCompile;
+}
+
+#define OE_GL_ZONE osgEarth::ScopedGLDebugGroup __oe_glscope(typeid(*this).name())
+#define OE_GL_ZONE_NAMED(X) osgEarth::ScopedGLDebugGroup __oe_glscope(X)
+
+#define OE_GL_PUSH(X) if (GLUtils::isGLDebuggingEnabled()) GLUtils::pushDebugGroup(X)
+#define OE_GL_POP if (GLUtils::isGLDebuggingEnabled()) GLUtils::popDebugGroup()
+
+namespace osgEarth
+{
+    using namespace Threading;
+
+    struct OSGEARTH_EXPORT GLUtils
+    {
+        //! Sets any default uniforms required by the implementation
+        static void setGlobalDefaults(osg::StateSet* stateSet);
+
+        //! Configure lighting (GL_LIGHTING)
+        static void setLighting(osg::StateSet* stateSet, osg::StateAttribute::OverrideValue ov);
+        
+        //! Configure line width (GL_LINE_WIDTH)
+        static void setLineWidth(osg::StateSet* stateSet, float value, osg::StateAttribute::OverrideValue ov);
+
+        //! Configure line stippling (GL_LINE_STIPPLE)
+        static void setLineStipple(osg::StateSet* stateSet, int factor, unsigned short pattern, osg::StateAttribute::OverrideValue ov);
+
+        //! Configure line antialiasing (GL_LINE_SMOOTH)
+        static void setLineSmooth(osg::StateSet* stateSet, osg::StateAttribute::OverrideValue ov);
+
+        //! Configure point rendering size (GL_POINT_SIZE)
+        static void setPointSize(osg::StateSet* stateSet, float value, osg::StateAttribute::OverrideValue ov);
+
+        //! Configure point rounding/antialiasing (GL_POINT_SMOOTH)
+        static void setPointSmooth(osg::StateSet* stateSet, osg::StateAttribute::OverrideValue ov);
+
+        //! Removes the state associated with a GL capability, causing it to inherit from above.
+        //! and if one of: GL_LIGHTING, GL_LINE_WIDTH, GL_LINE_STIPPLE, GL_LINE_SMOOTH, GL_POINT_SIZE
+        static void remove(osg::StateSet* stateSet, GLenum cap);
+
+        //! Enables global GL debugging
+        static void enableGLDebugging();
+
+        //! Whether global GL debugging is enabled
+        static bool isGLDebuggingEnabled() { return _gldebugging; }
+
+        //! Push a GL debugging group
+        static void pushDebugGroup(const char* name);
+
+        //! Pop a GL debugging group
+        static void popDebugGroup();
+
+        //! Whether to use NVGL when possible (and if supported)
+        static void useNVGL(bool value);
+        static bool useNVGL() { return _useNVGL; }
+
+        //! Unique ID associated with this State object (and by extension
+        //! its unique graphics context). You can use this to track
+        //! GL objects that cannot be used across shared GCs.
+        static unsigned getUniqueStateID(const osg::State& state);
+
+        //! Graphics context ID shared between all states sharing
+        //! the same graphics context. Only use for GL object that can
+        //! be shared by multiple graphics contexts (multi-window setup)
+        static unsigned getSharedContextID(const osg::State& state);
+
+    private:
+        static bool _gldebugging;
+        static bool _useNVGL;
+    };
+
+    /**
+     * Scope-based GL debug group 
+     */
+    struct ScopedGLDebugGroup
+    {
+        ScopedGLDebugGroup(const char* name) { OE_GL_PUSH(name); }
+        ~ScopedGLDebugGroup() { OE_GL_POP; }
+    };
+
+    struct OSGEARTH_EXPORT CustomRealizeOperation : public osg::Operation
+    {
+        virtual void operator()(osg::Object*);
+        void setSyncToVBlank(bool);
+        optional<bool> _vsync;
+        optional<bool> _gldebug;
+    };
+
+    struct OSGEARTH_EXPORT GL3RealizeOperation : public CustomRealizeOperation
+    {
+        virtual void operator()(osg::Object*);
+    };
+
+    //! A draw command for indirect rendering
+    struct DrawElementsIndirectCommand
+    {
+        GLuint  count;          // how many indices comprise this draw command
+        GLuint  instanceCount;  // how many instances of the geometry to draw
+        GLuint  firstIndex;     // index of the first element in the EBO to use
+        GLuint  baseVertex;     // offset to add to each element index (lets us use USHORT even when >65535 verts)
+        GLuint  baseInstance;   // offset to instance # when fetching vertex attrs (does NOT affect gl_InstanceID)
+
+        DrawElementsIndirectCommand() :
+            count(0), instanceCount(1), firstIndex(0), baseVertex(0), baseInstance(0) { }
+    };
+
+    //! A dispatch command for indirect compute
+    struct DispatchIndirectCommand
+    {
+        GLuint num_groups_x;
+        GLuint num_groups_y;
+        GLuint num_groups_z;
+
+        DispatchIndirectCommand() : num_groups_x(1), num_groups_y(0), num_groups_z(0) { }
+    };
+
+    //! A pointer record for bindless buffer usage
+    struct BindlessPtrNV
+    {
+        GLuint index;      // unused
+        GLuint reserved;   // unused
+        GLuint64 address;  // GPU address of bindless buffer
+        GLuint64 length;   // length in bytes of bindless buffer
+
+        BindlessPtrNV() : index(0), reserved(0), address(0), length(0) { }
+    };
+
+    //! A draw command for NVIDIA bindless buffer draws with a single VBO
+    struct DrawElementsIndirectBindlessCommandNV
+    {
+        DrawElementsIndirectCommand cmd;
+        GLuint reserved;
+        BindlessPtrNV indexBuffer;
+        BindlessPtrNV vertexBuffer;
+
+        DrawElementsIndirectBindlessCommandNV() :
+            cmd(), reserved(0), indexBuffer(), vertexBuffer() { }
+    };
+
+    class OSGEARTH_EXPORT PerStateGLObjects
+    {
+    public:
+        template<typename T>
+        static inline T& get(osg::buffered_object<T>& arr, const osg::State& state) {
+            return arr[GLUtils::getUniqueStateID(state)];
+        }
+    };
+
+    class OSGEARTH_EXPORT ShareableGLObjects
+    {
+    public:
+        template<typename T>
+        static inline T& get(osg::buffered_object<T>& arr, const osg::State& state) {
+            return arr[GLUtils::getSharedContextID(state)];
+        }
+    };
+
+    //! Base class for GL object containers
+    class OSGEARTH_EXPORT GLObject
+    {
+    public:
+        using Ptr = std::shared_ptr<GLObject>;
+        using Compatible = std::function<bool(GLObject*)>;
+
+        //! GL object "name" (an integer returned from glGen*)
+        GLuint name() const { return _name; }
+
+        //! debug category
+        const std::string& category() const { return _category; }
+
+        //! debug uid
+        const std::string& uid() const { return _uid; }
+
+        //! full debug label (unique ID if set)
+        std::string label() const {
+            return category() + (uid().empty() ? "" : (":" + uid()));
+        }
+
+        //! namespace (GL_BUFFER, GL_TEXTURE, etc)
+        GLenum ns() const { return _ns; }
+
+        //! whether this object can be re-used without reallocation
+        bool recyclable() const { return _recyclable; }
+
+        //! whether this object can be shared between shared GCs
+        bool shareable() const { return _shareable; }
+
+        //! true if this object is OK to use
+        bool valid() const { return _name != 0 && _ext != nullptr;  }
+
+        //! OSG extensions API
+        osg::GLExtensions* ext() const { return _ext; }
+
+        //! GC under which this object was created
+        const osg::GraphicsContext* gc() const { return _gc; }
+
+        //! Sets the GL debugging category and unique ID
+        void debugLabel(
+            const std::string& category,
+            const std::string& uniqueid = "");
+
+    public:
+        virtual void release() = 0;
+        virtual GLsizei size() const = 0;
+        
+    protected:
+        GLObject(GLenum ns, osg::State& state);
+        GLuint _name; // GL name assigned on creation
+        std::string _uid; // debugging unique id (optional)
+        std::string _category; // debugging category (optional)
+        GLenum _ns; // object namespace
+        bool _shareable; // can this object be shared between GCs?
+        bool _recyclable; // can this object by re-used?
+        osg::GLExtensions* _ext;
+        osg::GraphicsContext* _gc;
+        friend class GLObjectPool;
+
+        struct Resident {
+            bool _value; Resident() : _value(false) { }
+            Resident& operator = (bool input) { _value = input; return *this; }
+            bool operator == (const bool& rhs) const { return rhs == _value; }
+            bool operator != (const bool& rhs) const { return rhs != _value; }
+        };
+    };
+
+    class OSGEARTH_EXPORT GLQuery : public GLObject
+    {
+    public:
+        using Ptr = std::shared_ptr<GLQuery>;
+
+        //! Create a new query object.
+        static Ptr create(GLenum target, osg::State& state);
+
+        //! Start the query
+        void begin();
+
+        //! Are the results ready to read?
+        bool isReady() const;
+
+        //! End the query and fetch its value.
+        //! This will stall the pipeline if the result is not ready yet.
+        //! Call isReady() to check.
+        void getResult(GLuint* result);
+
+        //! End a query. Usually called after getResult.
+        void end();
+
+    public:
+        void release() override;
+        GLsizei size() const override { return sizeof(GLuint); }
+
+    private:
+        GLQuery(GLenum target, osg::State& state);
+        GLenum _target;
+        bool _active;
+    };
+
+    class OSGEARTH_EXPORT GLVAO : public GLObject
+    {
+    public:
+        using Ptr = std::shared_ptr<GLVAO>;
+
+        //! Create a new VAO.
+        static Ptr create(osg::State& state);
+
+        //! Bind the VAO.
+        void bind();
+
+        //! Unbind the VAO. (bind to 0)
+        void unbind();
+
+    public:
+        void release() override;
+        GLsizei size() const override { return sizeof(GLuint); }
+
+    private:
+        GLVAO(osg::State& state);
+    };
+
+    //! A buffer object
+    class OSGEARTH_EXPORT GLBuffer : public GLObject
+    {
+    public:
+        using Ptr = std::shared_ptr<GLBuffer>;
+
+        //! Creates a new unallocated buffer.
+        static Ptr create(
+            GLenum target,
+            osg::State& state);
+
+        //! Creates a new unallocated buffer.
+        //! The "size hint" allows it to potentially be created from recycled
+        //! GPU memory.
+        static Ptr create(
+            GLenum target,
+            osg::State& state,
+            GLsizei sizeHint);
+
+        //! Bind this buffer to target() in the active context.
+        void bind() const;
+
+        //! bind to something other than target()
+        void bind(GLenum target) const;
+
+        //! binds this buffer's target to zero.
+        void unbind() const;
+
+        //! target to which this buffer is bound
+        GLenum target() const { return _target; }
+
+        //! allocated size of this buffer, from a call to bufferData or bufferStorage
+        GLsizei size() const override { return _size; }
+
+        //! de-allocate and release this buffer
+        virtual void release();
+
+        //! Upload data to the GPU. This method uses bufferData() or bufferSubData()
+        //! depending on whether it needs to allocate more space.
+        //! Automatically calls bind()/unbind().
+        void uploadData(GLsizei size, const GLvoid* data, GLbitfield flags=GL_DYNAMIC_DRAW) const;
+
+        //! Convenience template to upload a vector
+        template<class T>
+        void uploadData(const std::vector<T>& v, GLbitfield flags = GL_DYNAMIC_DRAW) {
+            uploadData(v.size() * sizeof(T), v.data(), flags);
+        }
+
+        //! Convenience template to upload a vector to a custom target
+        template<class T>
+        void uploadData(GLenum target, std::vector<T>& v, GLbitfield flags = GL_DYNAMIC_DRAW) {
+            uploadData(target, v.size() * sizeof(T), v.data(), flags);
+        }
+
+        //! glBufferData - reallocate entire buffer
+        void bufferData(GLsizei size, const GLvoid* data, GLbitfield flags = GL_DYNAMIC_DRAW) const;
+
+        //! Convenience template to reallocate and upload a collection
+        template<class T>
+        void bufferData(const T& v, GLbitfield flags) const {
+            bufferData(v.size() * sizeof(T::value_type), v.data(), flags);
+        }
+
+        //! glBufferSubData - upload a subset of data to the GPU
+        void bufferSubData(GLintptr offset, GLsizei size, const GLvoid* data) const;
+
+        //! Convenience template to subdata a typed collection
+        template<class T>
+        void bufferSubData(const T& v) const {
+            bufferSubData(0, v.size() * sizeof(T::value_type), v.data());
+        }
+
+        //! glBufferStorage - allocate with immutable storage
+        void bufferStorage(GLsizei size, const GLvoid* data, GLbitfield flags =0) const;
+
+        //! map the buffer to a pointer
+        void* map(GLbitfield access) const;
+
+        //! map a range of the buffer to a pointer
+        void* mapRange(GLintptr offset, GLsizei length, GLbitfield access) const;
+
+        //! unmap a pointer mapped with map()
+        void unmap() const;
+
+        //! GPU copy this buffer to another buffer
+        void copyBufferSubData(GLBuffer::Ptr dest, GLintptr readOffset, GLintptr writeOffset, GLsizei size) const;
+
+        //! Read data from the buffer to the CPU
+        void getBufferSubData(GLintptr offset, GLsizei size, void* ptr) const;
+
+        //! bind the buffer to the layout index as specified in the shader
+        //! (for SSBO/UBO/ACBO/TFBO only)
+        void bindBufferBase(GLuint index) const;
+
+        //! Creates and/or returns the GPU address of this buffer
+        //! (for use with bindless buffers only)
+        GLuint64 address();
+
+        //! Makes a bindless buffer resident within the state's context/
+        //! Note: You must make a bindless buffer resident in each
+        //! graphics context in which you use it (spec).
+        void makeResident(osg::State&);
+
+        //! Make a bindless buffer non-resident within the state's context.
+        void makeNonResident(osg::State&);
+
+        //! Align a value for the storage target.
+        size_t align(size_t val);
+
+    protected:
+        GLBuffer(GLenum target, osg::State& state);
+        GLenum _target;
+        GLuint64 _address; // bindless GPU address
+        mutable GLsizei _size;
+        mutable bool _immutable;
+        mutable std::unordered_map<const osg::GraphicsContext*, Resident> _isResident;
+    };
+
+    //! A texture object with optional resident handle
+    class OSGEARTH_EXPORT GLTexture : public GLObject
+    {
+    public:
+        using Ptr = std::shared_ptr<GLTexture>;
+
+        struct OSGEARTH_EXPORT Profile : public osg::Texture::TextureProfile
+        {
+            Profile(GLenum target);
+            Profile(
+                GLenum    target,
+                GLint     numMipmapLevels,
+                GLenum    internalFormat,
+                GLsizei   width,
+                GLsizei   height,
+                GLsizei   depth,
+                GLint     border,
+                GLint     minFilter,
+                GLint     magFilter,
+                GLint     wrapS,
+                GLint     wrapT,
+                GLint     wrapR,
+                GLfloat   maxAnisotropy);
+            GLint _minFilter, _magFilter;
+            GLint _wrapS, _wrapT, _wrapR;
+            GLfloat _maxAnisotropy;
+            bool operator == (const Profile& rhs) const;
+        };
+
+        //! Creates a new GL texture object.
+        static Ptr create(
+            GLenum target,
+            osg::State& state);
+
+        //! Creates a new GL texture object.
+        //! The profileHint describes its configuration so it can potentially
+        //! be made from recycled GPU memory.
+        static Ptr create(
+            GLenum target,
+            osg::State& state,
+            const Profile& profileHint);
+
+        //! Binds this texture to `target`
+        void bind(osg::State& state);
+
+        //! Returns the GPU address of a bindless texture
+        GLuint64 handle(osg::State& state);
+
+        //! Toggles the bindless texture residency in the unique
+        //! graphics context associated with `state`.
+        void makeResident(const osg::State& state, bool toggle);
+
+        //! Whether the texture is resident in the unique
+        //! graphics context associated with `state`.
+        bool isResident(const osg::State& state) const;
+
+        void release();
+        const Profile& profile() const { return _profile; }
+        std::string& id() { return _id; }
+        GLsizei size() const override { return _size; }
+
+        void storage2D(const Profile& profile);
+        void storage3D(const Profile& profile);
+        void subImage2D(GLint level, GLint xoff, GLint yoff, GLsizei width, GLsizei height, GLenum format, GLenum type, const void* pixels) const;
+        void subImage3D(GLint level, GLint xoff, GLint yoff, GLint zoff, GLsizei width, GLsizei height, GLsizei depth, GLenum format, GLenum type, const void* pixels) const;
+        void compressedSubImage2D(GLint level, GLint xoff, GLint yoff, GLsizei width, GLsizei height, GLenum format, GLsizei imageSize, const void* data) const;
+        void compressedSubImage3D(GLint level, GLint xoff, GLint yoff, GLint zoff, GLsizei width, GLsizei height, GLsizei depth, GLenum format, GLsizei imageSize, const void* data) const;
+
+    protected:
+        GLTexture(
+            GLenum target,
+            osg::State& state);
+
+    private:
+        GLenum _target;
+        GLuint64 _handle;
+        mutable std::unordered_map<const osg::GraphicsContext*, Resident> _isResident;
+        std::string _id;
+        GLsizei _size;
+        Profile _profile;
+        void reset(GLenum, const std::string&, const std::string&, osg::State&);
+    };
+
+    /**
+     * GL Framebuffer object - for rendering to a texture.
+    */
+    class OSGEARTH_EXPORT GLFBO : public GLObject
+    {
+    public:
+        using Ptr = std::shared_ptr<GLFBO>;
+
+        using DrawFunction = std::function<void(osg::State&)>;
+
+        static Ptr create(
+            osg::State& state);
+
+        //! Render something to a texture using this FBO.
+        GLTexture::Ptr renderToTexture(
+            GLsizei width,
+            GLsizei height,
+            DrawFunction draw,
+            osg::State& state);
+
+    public: // GLObject
+
+        void release() override;
+        GLsizei size() const override;
+
+    protected:
+        GLFBO(osg::State&);
+    };
+
+    /**
+     * Mechanism that will automatically delete a GL object
+     * when its container goes out of scope
+     */
+    class OSGEARTH_EXPORT GLObjectPool : public osg::GraphicsObjectManager
+    {
+    public:
+        using Collection = std::vector< GLObject::Ptr >;
+
+        //! construct an object pool under the given graphics context ID
+        GLObjectPool(unsigned contextID);
+
+        //! Fetch the object pool for the graphics context represented
+        //! by the state object
+        static GLObjectPool* get(osg::State& state);
+
+        //! Release all GL objects that were created in the given state's
+        //! graphics context
+        static void releaseGLObjects(osg::State* state);
+
+        //! Start watching a GL object for automatic release
+        void watch(GLObject::Ptr);
+
+        //! Report the total memory size of all objects in the pool
+        GLsizeiptr totalBytes() const;
+
+        //! Get a vector of all extant object pools
+        static std::unordered_map<int, GLObjectPool*> getAll();
+
+        //! Set the speed at which the pool will release orphaned objects.
+        //! zero is the slowest.
+        void setAvarice(unsigned value) { _avarice = value; _hits = 0; _misses = 0; }
+        unsigned getAvarice() const { return _avarice; }
+
+        unsigned recycleHits() const { return _hits; }
+        unsigned recycleMisses() const { return _misses; }
+        Collection objects() const;
+
+        template<typename T>
+        typename T::Ptr recycle(const GLObject::Compatible& compatible) {
+            ScopedMutexLock lock(_mutex);
+            typename T::Ptr result;
+            for (auto& object : _objects) {
+                if (object.use_count() == 1 && compatible(object.get())) {
+                    result = std::dynamic_pointer_cast<T>(object);
+                    ++_hits;
+                    break;
+                }
+            }
+            if (result == nullptr)
+                ++_misses;
+            return result;
+        }
+
+        void releaseOrphans(const osg::GraphicsContext* gc);
+
+    public: //osg::GraphicsObjectManager
+
+        void flushDeletedGLObjects(double now, double& avail) override;
+        void flushAllDeletedGLObjects() override;
+        void deleteAllGLObjects() override;
+        void discardAllGLObjects() override;
+
+    protected:
+
+        mutable Mutex _mutex;
+        Collection _objects;
+        GLsizeiptr _totalBytes;
+        unsigned _hits;
+        unsigned _misses;
+        unsigned _avarice;
+
+        struct GC {
+            GC() : _gc(nullptr), _operation(nullptr) { }
+            const osg::GraphicsContext* _gc;
+            osg::ref_ptr<osg::GraphicsOperation> _operation;
+        };
+
+        std::vector<GC> _gcs;
+
+        //! Start tracking object lifetime for a GC
+        void track(osg::GraphicsContext*);
+
+        //! Release all objects created in the provided GC
+        void releaseAll(const osg::GraphicsContext*);
+
+    private:
+        static Mutexed<std::vector<GLObjectPool*>> _pools;
+    };
+
+    /**
+     * Interface class for OSG GL functions
+     */
+    class OSGEARTH_EXPORT OSG_GL_API
+    {
+    public:
+        virtual void apply(osg::State& state) const { }
+        virtual void compileGLObjects(osg::State& state) const = 0;
+        virtual void resizeGLObjectBuffers(unsigned maxsize) = 0;
+        virtual void releaseGLObjects(osg::State* state) const = 0;
+    };
+
+    // State attribute containing an object with the OSG GL API
+    class OSGEARTH_EXPORT StateAttributeAdapter : public osg::StateAttribute
+    {
+    public:
+        StateAttributeAdapter(OSG_GL_API* object) : _object(object) { }
+
+        void apply(osg::State& state) const override
+        {
+            if (_object)
+                _object->apply(state);
+        }
+
+        void resizeGLObjectBuffers(unsigned maxSize) override
+        {
+            if (_object)
+                _object->resizeGLObjectBuffers(maxSize);
+        }
+
+        void releaseGLObjects(osg::State* state) const override
+        {
+            if (_object)
+                _object->releaseGLObjects(state);
+        }
+
+        META_StateAttribute(osgEarth, StateAttributeAdapter, (osg::StateAttribute::Type)12131416);
+        StateAttributeAdapter() : _object(nullptr) { }
+        StateAttributeAdapter(const StateAttributeAdapter& rhs, const osg::CopyOp& op) { }
+        int compare(const osg::StateAttribute& rhs) const override { return -1; }
+
+    private:
+        OSG_GL_API* _object;
+    };
+
+
+    /**
+     * An osg::Operation can takes a lambda function and runs
+     * on a graphics context.
+     */
+    class OSGEARTH_EXPORT GPUOperation : public osg::Operation
+    {
+    public:
+        using Function = std::function<bool(osg::State&)>;
+
+        GPUOperation(const std::string& name, Function func) :
+            osg::Operation(name, true),
+            _func(func) {
+            //nop
+        }
+
+        GPUOperation(Function func) :
+            osg::Operation("osgEarth::GPUOperation", true),
+            _func(func) {
+            //nop
+        }
+
+        void operator()(osg::Object* obj) override
+        {
+            if (getKeep())
+            {
+                setKeep(_func(*static_cast<osg::GraphicsContext*>(obj)->getState()));
+            }
+        }
+
+    private:
+        Function _func;
+    };
+
+    /**
+     * API for launching GPU thread jobs. Any function dispatched here will
+     * execute on the OSG graphics thread and return a future result.
+     *
+     * NOTE: This implementation will run the job under an arbitrary graphics
+     * context. So it is not currently suitable for operations that must be
+     * executed on multiple contexts.
+     *
+     * Example usage (graphics thread operation returning a bool):
+     *
+     *  // Dispatch the asynchronous job:
+     *  GPUJob<bool>::Result result = GPUJob<bool>::dispatch(
+     *      [=](osg::State* state, Cancelable* progress)
+     *      {
+     *           // do something 
+     *           return bool;
+     *      }
+     *  );
+     *
+     *  // Block until the result is ready:
+     *  bool value = result.get();
+     */
+    template<typename RESULT_TYPE>
+    class GPUJob
+    {
+    public:
+        //! Result type - future that will eventually contain the return value
+        using Result = Future<RESULT_TYPE>;
+
+        //! Function type of async job
+        using Function = std::function<RESULT_TYPE(osg::State*, Cancelable*)>;
+
+        //! Dispatch the asynchronous function.
+        //! @param function Function to execute in the graphics thread
+        //! @return Future result value. If this object goes out of scope,
+        //!   the job may by canceled.
+        static Result dispatch(
+            const Function& function);
+    };
+
+    /**
+     * GL pipeline for asynchronous GPU tasks.
+     *
+     * Dispatch a job on the GPU like so:
+     *
+     * auto task =
+     *    [&](osg::State& state, Promise<MyObject>& promise, int invocation)
+     *    {
+     *        MyObject result;
+     *        // do some GPU work
+     *        ...
+     *        promise.resolve(result);
+     *        return false;
+     *    };
+     *
+     * Future<MyObject> job = GLPipeline::get(state)->dispatch<MyObject>(task);
+     *
+     * Return "true" from the function to request another invocation.
+     * Each invocation will increment the "invocation" argument so you 
+     * can run multi-pass operations that don't stall the GL pipeline.
+     */
+    class OSGEARTH_EXPORT GLPipeline
+    {
+    public:
+        using Ptr = std::shared_ptr<GLPipeline>;
+        using WeakPtr = std::weak_ptr<GLPipeline>;
+
+        // Delegate function that fulfills a promise of type T.
+        // Return "true" from the delegate to re-run the delegate.
+        // Each run of the delegate will increase the "invocation"
+        // by one, to support multi-pass computation.
+        // Return "false" from the delegate when finished.
+        template<typename T>
+        using Delegate = std::function<bool(
+            osg::State& state,
+            Promise<T>& promise,
+            int         invocation)>;
+
+    public:
+        //! Gets the GL pipeline for a State
+        static GLPipeline::Ptr get(osg::State& state);
+
+    private:
+        // Internal delegation operation for the GC queue:
+        template<typename T>
+        struct DelegateOperation : public osg::Operation {
+            Delegate<T> _delegate;
+            Promise<T> _promise;
+            int _invocation;
+
+            DelegateOperation(Delegate<T> d) :
+                osg::Operation("GLPipeline", true),
+                _delegate(d),
+                _invocation(0) { }
+
+            void operator()(osg::Object* obj) {
+                if (getKeep()) {
+                    auto gc = static_cast<osg::GraphicsContext*>(obj);
+                    setKeep(_delegate(*gc->getState(), _promise, _invocation++));
+                }
+            }
+        };
+
+        // Internal delegation operation for the GC queue
+        // that reference a user-created Promise object
+        template<typename T>
+        struct DelegateOperation2 : public osg::Operation {
+            Delegate<T> _delegate;
+            Promise<T>& _promise;
+            int _invocation;
+
+            DelegateOperation2(Delegate<T> d, Promise<T>& promise) :
+                osg::Operation("GLPipeline", true),
+                _delegate(d),
+                _promise(promise),
+                _invocation(0) { }
+
+            void operator()(osg::Object* obj) {
+                if (getKeep()) {
+                    auto gc = static_cast<osg::GraphicsContext*>(obj);
+                    setKeep(_delegate(*gc->getState(), _promise, _invocation++));
+                }
+            }
+        };
+
+    public:
+        // Launch an operation on this GL Pipeline.
+        template<typename T>
+        Future<T> dispatch(Delegate<T> delegate)
+        {
+            auto operation = new DelegateOperation<T>(delegate);
+            Future<T> future = operation->_promise.getFuture();
+            if (_dispatcher.valid())
+                _dispatcher->push(operation);
+            else
+                _gc->add(operation);
+            return future;
+        }
+
+        // Launch an operation on this GL Pipeline, supplying your own Promise.
+        // Be sure to call getFuture() prior to calling this function.
+        template<typename T>
+        void dispatch(Delegate<T> delegate, Promise<T>& promise)
+        {
+            auto operation = new DelegateOperation2<T>(delegate, promise);
+            if (_dispatcher.valid())
+                _dispatcher->push(operation);
+            else
+                _gc->add(operation);
+        }
+
+    private:
+        osg::ref_ptr<osg::GraphicsContext> _gc;
+        static Mutex _mutex;
+        static std::unordered_map<osg::State*, GLPipeline::Ptr> _lut;
+
+        struct Dispatcher : public osg::GraphicsOperation
+        {
+            Dispatcher(GLPipeline::Ptr);
+            void operator()(osg::GraphicsContext*) override;
+            using OpQ = std::queue<osg::ref_ptr<osg::Operation>>;
+            OpQ _thisQ;
+            Mutex _queue_mutex;
+            GLPipeline::WeakPtr _pipeline_ref;
+            osg::ref_ptr<osg::GraphicsContext> _myGC;
+            void push(osg::Operation*);
+        };
+
+        osg::ref_ptr<Dispatcher> _dispatcher;
+    };
+
+    /**
+     * Base class for a GPU Compute job that generates or modifies
+     * a raster image on the GPU and reads it back to the CPU.
+     * The name of the image in the compute shader is "buf" and it
+     * is bound to layout location zero (0).
+     */
+    class OSGEARTH_EXPORT ComputeImageSession
+    {
+    public:
+        //! construct a new session
+        ComputeImageSession();
+
+        //! Sets the compute shader program to use
+        void setProgram(osg::Program* program);
+
+        //! Sets the image to submit to the compute shader
+        void setImage(osg::Image* image);
+
+        //! Runs the compute shader and waits for the result
+        //! to be read back to the CPU.
+        void execute(osg::State&);
+
+    protected:
+        osg::ref_ptr<osg::Image> _image;
+        osg::ref_ptr<osg::StateSet> _stateSet;
+
+        virtual void renderImplementation(osg::State* state) = 0;
+
+    private:
+        GLuint _pbo;
+        osg::Texture2D* _tex;
+
+        void render(osg::State* state);
+        void readback(osg::State* state);
+    };
+
+    template<typename T>
+    class PerThreadComputeSession
+    {
+    public:
+        PerThreadComputeSession() :
+            _sessions("PerThreadComputeSession(OE)") { }
+
+        T& get(osg::Program* program) const {
+            ScopedMutexLock lock(_sessions);
+            SessionPtr& ptr = _sessions[getCurrentThreadId()];
+            if (ptr == nullptr) {
+                ptr = std::make_shared<T>();
+                ptr->setProgram(program);
+            }
+            return *ptr.get();
+        }
+    private:
+        using SessionPtr = std::shared_ptr<T>;
+        using SessionPtrPerThread = Mutexed<std::unordered_map<unsigned, SessionPtr>>;
+        mutable SessionPtrPerThread _sessions;
+    };
+
+    /**
+     * Utility to "pre-compile" a node by running it through the ICO
+     * if one exists in the Options. If there is no ICO, this is a no-op
+     */
+    class OSGEARTH_EXPORT GLObjectsCompiler
+    {
+    public:
+        //! Analyze the node and collect the compilable state
+        osg::ref_ptr<osgUtil::StateToCompile> collectState(
+            osg::Node* node) const;
+
+        void compileNow(
+            const osg::ref_ptr<osg::Node>& node,
+            const osg::Object* host,
+            osgEarth::Threading::Cancelable* progress) const;
+
+        Future<osg::ref_ptr<osg::Node>> compileAsync(
+            const osg::ref_ptr<osg::Node>& node,
+            const osg::Object* host,
+            osgEarth::Threading::Cancelable* progress) const;
+
+        Future<osg::ref_ptr<osg::Node>> compileAsync(
+            const osg::ref_ptr<osg::Node>& node,
+            osgUtil::StateToCompile* state,
+            const osg::Object* host,
+            osgEarth::Threading::Cancelable* progress) const;
+
+        static int totalJobs() { return (int)_jobsActive; }
+
+    private:
+        static std::atomic_int _jobsActive;
+    };
+}
+
+#endif // OSGEARTH_GLUTILS_H
